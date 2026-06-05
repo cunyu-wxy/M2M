@@ -1,6 +1,17 @@
 # M2M
 
-M2M is a Cloudflare Worker for reading a NetEase Cloud Music playlist URL and returning normalized track metadata. The first endpoint focuses on NetEase Cloud Music to Apple Music migration preparation.
+M2M is a Cloudflare Worker app for reading a NetEase Cloud Music playlist URL and preparing or importing it into Apple Music. The root page serves the browser UI, and the API routes provide playlist parsing and Apple Music token support.
+
+## Frontend flow
+
+The homepage implements this flow:
+
+- Input a NetEase Cloud Music playlist URL.
+- Show realtime parsing progress from the Worker with Server-Sent Events.
+- Display the parsed track table when parsing finishes.
+- Connect Apple Music with MusicKit JS.
+- Match tracks against the Apple Music catalog.
+- Create an Apple Music library playlist and show import success/failure counts.
 
 ## API
 
@@ -54,6 +65,34 @@ Body:
 }
 ```
 
+### `GET /netease/playlist/stream`
+
+Streams parser progress with Server-Sent Events.
+
+```sh
+curl -N "https://YOUR_WORKER.workers.dev/netease/playlist/stream?url=https%3A%2F%2F163cn.tv%2F8kPnBRH&limit=10"
+```
+
+Events:
+
+- `progress`: resolve, playlist, and song-detail batch progress.
+- `done`: final playlist payload.
+- `app-error`: normalized error payload.
+
+### `GET /apple/developer-token`
+
+Returns a short-lived Apple Music Developer Token for MusicKit JS.
+
+Required Cloudflare secrets:
+
+- `APPLE_TEAM_ID`
+- `APPLE_KEY_ID`
+- `APPLE_PRIVATE_KEY`
+
+Optional variable:
+
+- `APPLE_TOKEN_TTL_SECONDS`, default `43200`
+
 ## Local development
 
 ```sh
@@ -68,6 +107,14 @@ Then open:
 curl "http://localhost:8787/netease/playlist?url=https%3A%2F%2F163cn.tv%2F8kPnBRH&limit=10"
 ```
 
+For Apple Music import, set local secrets in `.dev.vars`:
+
+```sh
+APPLE_TEAM_ID=YOUR_TEAM_ID
+APPLE_KEY_ID=YOUR_KEY_ID
+APPLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----"
+```
+
 ## Deploy with GitHub Actions
 
 This repository includes `.github/workflows/deploy-worker.yml`.
@@ -78,6 +125,14 @@ This repository includes `.github/workflows/deploy-worker.yml`.
    - `CLOUDFLARE_API_TOKEN`
    - `CLOUDFLARE_ACCOUNT_ID`
 4. Push to `main`, or run the workflow manually from GitHub Actions.
+
+For Apple Music import, also add the Cloudflare Worker secrets in the Cloudflare dashboard or with Wrangler:
+
+```sh
+npx wrangler secret put APPLE_TEAM_ID
+npx wrangler secret put APPLE_KEY_ID
+npx wrangler secret put APPLE_PRIVATE_KEY
+```
 
 ## Deploy with Cloudflare Git integration
 

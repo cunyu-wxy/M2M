@@ -91,10 +91,12 @@ test("extracts a playlist with a fake fetcher", async () => {
 
     throw new Error(`Unexpected URL: ${url}`);
   };
+  const progressEvents = [];
 
   const result = await extractNeteasePlaylist("486271477", {
     fetcher: fakeFetch,
-    throttleMs: 0
+    throttleMs: 0,
+    onProgress: (event) => progressEvents.push(event)
   });
 
   assert.equal(result.playlist.id, 486271477);
@@ -103,6 +105,19 @@ test("extracts a playlist with a fake fetcher", async () => {
   assert.deepEqual(
     result.tracks.map((track) => `${track.name} - ${track.artists.join("/")}`),
     ["Song A - Artist A", "Song B - Artist B"]
+  );
+  assert.deepEqual(
+    progressEvents.map((event) => `${event.stage}:${event.status}`),
+    [
+      "resolve:running",
+      "resolve:complete",
+      "playlist:running",
+      "playlist:complete",
+      "song_details:running",
+      "song_details:running",
+      "song_details:complete",
+      "done:complete"
+    ]
   );
 });
 

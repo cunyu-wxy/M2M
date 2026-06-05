@@ -19,7 +19,16 @@ export class NeteaseError extends Error {
 export async function extractNeteasePlaylist(input, options = {}) {
   const fetcher = options.fetcher || fetch;
   const sourceUrl = normalizeInput(input);
+  await reportProgress(options.onProgress, { stage: "resolve", status: "running" });
   const resolvedPlaylist = await resolvePlaylistId(sourceUrl, fetcher);
+  await reportProgress(options.onProgress, {
+    stage: "resolve",
+    status: "complete",
+    playlistId: resolvedPlaylist.id,
+    resolvedUrl: resolvedPlaylist.resolvedUrl
+  });
+
+  await reportProgress(options.onProgress, { stage: "playlist", status: "running" });
   const playlistPayload = await fetchPlaylistDetail(resolvedPlaylist.id, fetcher);
   const playlist = playlistPayload.playlist;
 
@@ -32,6 +41,15 @@ export async function extractNeteasePlaylist(input, options = {}) {
   const allTrackIds = playlist.trackIds.map((track) => track.id).filter(Boolean);
   const requestedTrackIds = options.limit ? allTrackIds.slice(0, options.limit) : allTrackIds;
 
+  await reportProgress(options.onProgress, {
+    stage: "playlist",
+    status: "complete",
+    playlistId: playlist.id,
+    playlistName: playlist.name,
+    trackCount: playlist.trackCount,
+    requestedTrackCount: requestedTrackIds.length
+  });
+
   if (requestedTrackIds.length > maxTracks) {
     throw new NeteaseError(
       413,
@@ -43,12 +61,13 @@ export async function extractNeteasePlaylist(input, options = {}) {
 
   const songsById = await fetchSongDetails(requestedTrackIds, fetcher, {
     batchSize,
-    throttleMs: options.throttleMs ?? 100
+    throttleMs: options.throttleMs ?? 100,
+    onProgress: options.onProgress
   });
   const tracks = buildTracks(requestedTrackIds, songsById);
   const missingCount = tracks.filter((track) => track.missing).length;
 
-  return {
+  const result = {
     sourceUrl,
     resolvedUrl: resolvedPlaylist.resolvedUrl,
     playlist: {
@@ -64,6 +83,15 @@ export async function extractNeteasePlaylist(input, options = {}) {
     limited: requestedTrackIds.length !== allTrackIds.length,
     tracks
   };
+
+  await reportProgress(options.onProgress, {
+    stage: "done",
+    status: "complete",
+    extractedCount: result.extractedCount,
+    missingCount: result.missingCount
+  });
+
+  return result;
 }
 
 export function extractPlaylistIdFromText(input) {
@@ -175,6 +203,13 @@ async function fetchPlaylistDetail(playlistId, fetcher) {
 
 async function fetchSongDetails(trackIds, fetcher, options) {
   const songsById = new Map();
+  await reportProgress(options.onProgress, {
+    stage: "song_details",
+    status: "running",
+    fetchedCount: 0,
+    totalCount: trackIds.length
+  });
+
   for (let startIndex = 0; startIndex < trackIds.length; startIndex += options.batchSize) {
     const chunk = trackIds.slice(startIndex, startIndex + options.batchSize);
     const songs = await fetchSongDetailChunk(chunk, fetcher);
@@ -183,10 +218,24 @@ async function fetchSongDetails(trackIds, fetcher, options) {
       songsById.set(song.id, song);
     }
 
+    await reportProgress(options.onProgress, {
+      stage: "song_details",
+      status: "running",
+      fetchedCount: Math.min(startIndex + chunk.length, trackIds.length),
+      totalCount: trackIds.length
+    });
+
     if (options.throttleMs > 0 && startIndex + options.batchSize < trackIds.length) {
       await sleep(options.throttleMs);
     }
   }
+
+  await reportProgress(options.onProgress, {
+    stage: "song_details",
+    status: "complete",
+    fetchedCount: trackIds.length,
+    totalCount: trackIds.length
+  });
 
   return songsById;
 }
@@ -285,4 +334,10 @@ function safeDecodeURIComponent(value) {
 
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function reportProgress(onProgress, event) {
+  if (typeof onProgress === "function") {
+    await onProgress({ ...event, timestamp: Date.now() });
+  }
 }

@@ -1,3 +1,5 @@
+import { AppleError, createAppleDeveloperToken, hasAppleCredentials } from "./apple.js";
+import { renderAppHtml } from "./frontend.js";
 import { NeteaseError, extractNeteasePlaylist } from "./netease.js";
 
 const corsHeaders = {
@@ -16,15 +18,28 @@ export default {
     try {
       const requestUrl = new URL(request.url);
 
-      if (requestUrl.pathname === "/" || requestUrl.pathname === "/health") {
+      if (requestUrl.pathname === "/" && request.method === "GET") {
+        return htmlResponse(renderAppHtml());
+      }
+
+      if (requestUrl.pathname === "/health") {
         return jsonResponse({
           ok: true,
-          endpoints: ["/netease/playlist"]
+          endpoints: ["/netease/playlist", "/netease/playlist/stream", "/apple/developer-token"],
+          appleConfigured: hasAppleCredentials(env)
         });
       }
 
       if (requestUrl.pathname === "/netease/playlist") {
-        return handleNeteasePlaylist(request, env, requestUrl);
+        return await handleNeteasePlaylist(request, env, requestUrl);
+      }
+
+      if (requestUrl.pathname === "/netease/playlist/stream") {
+        return handleNeteasePlaylistStream(request, env, requestUrl);
+      }
+
+      if (requestUrl.pathname === "/apple/developer-token") {
+        return await handleAppleDeveloperToken(request, env);
       }
 
       return jsonResponse(
@@ -65,6 +80,68 @@ async function handleNeteasePlaylist(request, env, requestUrl) {
   return jsonResponse(result);
 }
 
+function handleNeteasePlaylistStream(request, env, requestUrl) {
+  if (request.method !== "GET") {
+    return jsonResponse(
+      { error: { code: "method_not_allowed", message: "Use GET." } },
+      405
+    );
+  }
+
+  const sourceUrl = requestUrl.searchParams.get("url");
+  const limit = parseOptionalInteger(requestUrl.searchParams.get("limit"));
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      const send = (eventName, payload) => {
+        controller.enqueue(
+          encoder.encode(`event: ${eventName}\ndata: ${JSON.stringify(payload)}\n\n`)
+        );
+      };
+
+      (async () => {
+        try {
+          if (!sourceUrl) {
+            throw new NeteaseError(400, "missing_url", "Missing NetEase playlist URL.");
+          }
+
+          const result = await extractNeteasePlaylist(sourceUrl, {
+            limit,
+            maxTracks: parseOptionalInteger(env.NETEASE_MAX_TRACKS) || 2000,
+            batchSize: parseOptionalInteger(env.NETEASE_BATCH_SIZE) || 200,
+            onProgress: (event) => send("progress", event)
+          });
+          send("done", result);
+        } catch (error) {
+          send("app-error", serializeError(error));
+        } finally {
+          controller.close();
+        }
+      })();
+    }
+  });
+
+  return new Response(stream, {
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache"
+    }
+  });
+}
+
+async function handleAppleDeveloperToken(request, env) {
+  if (request.method !== "GET") {
+    return jsonResponse(
+      { error: { code: "method_not_allowed", message: "Use GET." } },
+      405
+    );
+  }
+
+  const token = await createAppleDeveloperToken(env);
+  return jsonResponse(token);
+}
+
 async function readJsonBody(request) {
   const contentType = request.headers.get("content-type") || "";
   if (!contentType.includes("application/json")) {
@@ -87,6 +164,15 @@ function parseOptionalInteger(value) {
   return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : null;
 }
 
+function htmlResponse(body, status = 200) {
+  return new Response(body, {
+    status,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8"
+    }
+  });
+}
+
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body, null, 2), {
     status,
@@ -98,7 +184,7 @@ function jsonResponse(body, status = 200) {
 }
 
 function errorResponse(error) {
-  if (error instanceof NeteaseError) {
+  if (error instanceof NeteaseError || error instanceof AppleError) {
     return jsonResponse(
       {
         error: {
@@ -120,4 +206,19 @@ function errorResponse(error) {
     },
     500
   );
+}
+
+function serializeError(error) {
+  if (error instanceof NeteaseError || error instanceof AppleError) {
+    return {
+      code: error.code,
+      message: error.message,
+      details: error.details || undefined
+    };
+  }
+
+  return {
+    code: "internal_error",
+    message: error && error.message ? error.message : "Internal error."
+  };
 }
