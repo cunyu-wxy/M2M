@@ -27,3 +27,16 @@ test("detects configured Apple credentials", () => {
     true
   );
 });
+
+test("accepts a pre-signed developer token", async () => {
+  const token =
+    "eyJhbGciOiJFUzI1NiIsImtpZCI6IkFCQzEyM0RFRkcifQ." +
+    "eyJpc3MiOiJERUYxMjNHSElKIiwiaWF0IjoxNDM3MTc5MDM2LCJleHAiOjE3ODAwMDAwMDB9." +
+    "signature";
+
+  assert.equal(hasAppleCredentials({ APPLE_DEVELOPER_TOKEN: token }), true);
+
+  const result = await createAppleDeveloperToken({ APPLE_DEVELOPER_TOKEN: token });
+  assert.equal(result.developerToken, token);
+  assert.equal(result.expiresAt, 1780000000);
+});

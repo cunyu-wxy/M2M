@@ -585,7 +585,8 @@ export function renderAppHtml() {
       developerToken: null,
       musicUserToken: null,
       importRows: [],
-      parseStartedAt: 0
+      parseStartedAt: 0,
+      appleConfigured: null
     };
 
     const elements = {
@@ -638,6 +639,7 @@ export function renderAppHtml() {
     elements.backToInput.addEventListener("click", () => resetToInput());
     elements.returnToParsed.addEventListener("click", () => showView("parse"));
     elements.modalClose.addEventListener("click", () => elements.modal.classList.remove("active"));
+    refreshHealth();
 
     function showView(name) {
       for (const [key, view] of Object.entries(elements.views)) {
@@ -701,6 +703,7 @@ export function renderAppHtml() {
         renderTracks(result.tracks);
         elements.afterParseActions.hidden = false;
         elements.trackTableWrap.hidden = false;
+        updateAppleButton();
         elements.metricMissing.textContent = String(result.missingCount);
         elements.metricParsed.textContent = String(result.extractedCount);
         setParseProgress(100, "解析完成");
@@ -774,6 +777,13 @@ export function renderAppHtml() {
 
     async function connectAppleMusic() {
       if (!state.parsed) return;
+      if (state.appleConfigured === false) {
+        showError(
+          "Apple Music 待配置",
+          "这个公共网站仍需要一个站点级 Apple Music Developer Token。用户 Apple ID 会在浏览器中单独授权，不会交给后端。"
+        );
+        return;
+      }
 
       try {
         elements.appStatus.textContent = "连接 Apple";
@@ -821,6 +831,26 @@ export function renderAppHtml() {
           build: "0.1.0"
         }
       });
+    }
+
+    async function refreshHealth() {
+      try {
+        const response = await fetch("/health");
+        const payload = await response.json();
+        state.appleConfigured = Boolean(payload.appleConfigured);
+        updateAppleButton();
+      } catch {
+        state.appleConfigured = null;
+      }
+    }
+
+    function updateAppleButton() {
+      if (!elements.connectApple) return;
+      if (state.appleConfigured === false) {
+        elements.connectApple.textContent = "Apple Music 待配置";
+      } else {
+        elements.connectApple.textContent = "连接 Apple Music";
+      }
     }
 
     async function importToAppleMusic(music, parsed) {

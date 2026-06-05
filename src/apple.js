@@ -9,6 +9,14 @@ export class AppleError extends Error {
 }
 
 export async function createAppleDeveloperToken(env, now = Math.floor(Date.now() / 1000)) {
+  const existingToken = valueFromEnv(env, "APPLE_DEVELOPER_TOKEN");
+  if (existingToken) {
+    return {
+      developerToken: existingToken,
+      expiresAt: decodeJwtExpiration(existingToken)
+    };
+  }
+
   const teamId = valueFromEnv(env, "APPLE_TEAM_ID");
   const keyId = valueFromEnv(env, "APPLE_KEY_ID");
   const privateKey = valueFromEnv(env, "APPLE_PRIVATE_KEY");
@@ -19,7 +27,10 @@ export async function createAppleDeveloperToken(env, now = Math.floor(Date.now()
       "apple_credentials_missing",
       "Apple Music app credentials are not configured on this Worker.",
       {
-        requiredSiteSecrets: ["APPLE_TEAM_ID", "APPLE_KEY_ID", "APPLE_PRIVATE_KEY"],
+        acceptedConfigurations: [
+          ["APPLE_DEVELOPER_TOKEN"],
+          ["APPLE_TEAM_ID", "APPLE_KEY_ID", "APPLE_PRIVATE_KEY"]
+        ],
         note: "These are site-level Apple Music API credentials, not end-user Apple ID credentials."
       }
     );
@@ -48,9 +59,10 @@ export async function createAppleDeveloperToken(env, now = Math.floor(Date.now()
 
 export function hasAppleCredentials(env) {
   return Boolean(
-    valueFromEnv(env, "APPLE_TEAM_ID") &&
-      valueFromEnv(env, "APPLE_KEY_ID") &&
-      valueFromEnv(env, "APPLE_PRIVATE_KEY")
+    valueFromEnv(env, "APPLE_DEVELOPER_TOKEN") ||
+      (valueFromEnv(env, "APPLE_TEAM_ID") &&
+        valueFromEnv(env, "APPLE_KEY_ID") &&
+        valueFromEnv(env, "APPLE_PRIVATE_KEY"))
   );
 }
 
@@ -101,4 +113,23 @@ function base64UrlBytes(bytes) {
 
 function valueFromEnv(env, key) {
   return env && typeof env[key] === "string" ? env[key].trim() : "";
+}
+
+function decodeJwtExpiration(token) {
+  const [, payload] = token.split(".");
+  if (!payload) {
+    return null;
+  }
+
+  try {
+    const normalizedPayload = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const paddedPayload = normalizedPayload.padEnd(
+      normalizedPayload.length + ((4 - (normalizedPayload.length % 4)) % 4),
+      "="
+    );
+    const decodedPayload = JSON.parse(atob(paddedPayload));
+    return Number.isFinite(decodedPayload.exp) ? decodedPayload.exp : null;
+  } catch {
+    return null;
+  }
 }
