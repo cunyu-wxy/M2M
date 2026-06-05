@@ -786,7 +786,11 @@ export function renderAppHtml() {
         const tokenResponse = await fetch("/apple/developer-token");
         const tokenPayload = await tokenResponse.json();
         if (!tokenResponse.ok) {
-          throw new Error(tokenPayload.error ? tokenPayload.error.message : "Apple Music 凭据未配置。");
+          throw new Error(
+            tokenPayload.error
+              ? tokenPayload.error.message + " 用户 Apple ID 仍会在浏览器中单独授权。"
+              : "站点尚未配置 Apple Music app 凭据。用户 Apple ID 仍会在浏览器中单独授权。"
+          );
         }
 
         state.developerToken = tokenPayload.developerToken;

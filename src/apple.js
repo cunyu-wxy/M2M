@@ -17,9 +17,10 @@ export async function createAppleDeveloperToken(env, now = Math.floor(Date.now()
     throw new AppleError(
       503,
       "apple_credentials_missing",
-      "Apple Music credentials are not configured on this Worker.",
+      "Apple Music app credentials are not configured on this Worker.",
       {
-        requiredSecrets: ["APPLE_TEAM_ID", "APPLE_KEY_ID", "APPLE_PRIVATE_KEY"]
+        requiredSiteSecrets: ["APPLE_TEAM_ID", "APPLE_KEY_ID", "APPLE_PRIVATE_KEY"],
+        note: "These are site-level Apple Music API credentials, not end-user Apple ID credentials."
       }
     );
   }
