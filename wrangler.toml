@@ -1,0 +1,8 @@
+name = "m2m"
+main = "src/index.js"
+compatibility_date = "2026-06-05"
+workers_dev = true
+
+[vars]
+NETEASE_MAX_TRACKS = "2000"
+NETEASE_BATCH_SIZE = "200"
