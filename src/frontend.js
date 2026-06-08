@@ -579,6 +579,12 @@ export function renderAppHtml() {
   </div>
 
   <script>
+    const MATCH_CONCURRENCY = 10;
+    const SEARCH_RESULT_LIMIT = 5;
+    const STRONG_MATCH_SCORE = 0.78;
+    const FALLBACK_MATCH_SCORE = 0.7;
+    const ACCEPT_MATCH_SCORE = 0.55;
+
     const state = {
       playlistUrl: "",
       parsed: null,
@@ -856,34 +862,32 @@ export function renderAppHtml() {
     async function importToAppleMusic(music, parsed) {
       const tracks = parsed.tracks.filter((track) => !track.missing);
       const storefront = music.storefrontId || "us";
-      const rows = [];
-      let matched = 0;
-      let failed = 0;
-      let searched = 0;
 
       elements.importTotal.textContent = String(tracks.length);
+      setImportProgress(8, "并发匹配歌曲 0/" + tracks.length);
 
-      for (const track of tracks) {
-        setImportProgress(8 + Math.round((searched / Math.max(tracks.length, 1)) * 62), "匹配歌曲 " + searched + "/" + tracks.length);
-        const match = await findAppleSong(music, storefront, track);
-        searched += 1;
-        if (match) {
-          matched += 1;
-          rows.push({ source: track, apple: match, status: "matched" });
-          setTrackStatus(track.id, "已匹配", "ok");
-        } else {
-          failed += 1;
-          rows.push({ source: track, apple: null, status: "not_found" });
-          setTrackStatus(track.id, "未找到", "fail");
-        }
-        elements.importMatched.textContent = String(matched);
-        elements.importFailed.textContent = String(failed);
-        if (searched % 10 === 0 || searched === tracks.length) {
-          addLog(elements.importLog, "已匹配 " + searched + "/" + tracks.length + "，成功 " + matched + " 首");
-        }
-        await wait(90);
-      }
+      const matchStartedAt = Date.now();
+      const matchResult = await matchAppleSongs(music, storefront, tracks, (progress) => {
+        const elapsedSeconds = Math.max((Date.now() - matchStartedAt) / 1000, 0.1);
+        const speed = progress.completed / elapsedSeconds;
+        const percent = 8 + Math.round((progress.completed / Math.max(tracks.length, 1)) * 62);
+        setImportProgress(
+          Math.min(percent, 70),
+          "匹配歌曲 " + progress.completed + "/" + tracks.length + " · " + speed.toFixed(1) + " 首/秒"
+        );
+        elements.importMatched.textContent = String(progress.matched);
+        elements.importFailed.textContent = String(progress.failed);
 
+        if (progress.completed % 25 === 0 || progress.completed === tracks.length) {
+          addLog(
+            elements.importLog,
+            "已匹配 " + progress.completed + "/" + tracks.length + "，成功 " + progress.matched + " 首，速度 " + speed.toFixed(1) + " 首/秒"
+          );
+        }
+      });
+
+      const rows = matchResult.rows;
+      const failed = matchResult.failed;
       const matchedRows = rows.filter((row) => row.apple);
       if (!matchedRows.length) {
         setImportProgress(100, "没有可载入曲目");
@@ -917,23 +921,128 @@ export function renderAppHtml() {
       addLog(elements.importLog, "载入完成，成功 " + importResult.succeeded + " 首，失败 " + (failed + importResult.failed) + " 首");
     }
 
-    async function findAppleSong(music, storefront, track) {
+    async function matchAppleSongs(music, storefront, tracks, onProgress) {
+      const rows = new Array(tracks.length);
+      const searchCache = new Map();
+      let nextIndex = 0;
+      let completed = 0;
+      let matched = 0;
+      let failed = 0;
+
+      async function runWorker() {
+        while (nextIndex < tracks.length) {
+          const trackIndex = nextIndex;
+          nextIndex += 1;
+          const track = tracks[trackIndex];
+          let match = null;
+
+          try {
+            match = await findAppleSong(music, storefront, track, searchCache);
+          } catch (error) {
+            console.warn("Apple Music search failed", error);
+          }
+
+          if (match) {
+            matched += 1;
+            rows[trackIndex] = { source: track, apple: match, status: "matched" };
+            setTrackStatus(track.id, "已匹配", "ok");
+          } else {
+            failed += 1;
+            rows[trackIndex] = { source: track, apple: null, status: "not_found" };
+            setTrackStatus(track.id, "未找到", "fail");
+          }
+
+          completed += 1;
+          onProgress({ completed, matched, failed });
+        }
+      }
+
+      const workerCount = Math.min(MATCH_CONCURRENCY, tracks.length);
+      await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+      return { rows, matched, failed };
+    }
+
+    async function findAppleSong(music, storefront, track, searchCache) {
       const queries = buildSearchQueries(track);
       let best = null;
 
-      for (const query of queries) {
-        const results = await music.api.search(query, { types: "songs", limit: 5, storefront });
-        const candidates = results && results.songs && Array.isArray(results.songs.data) ? results.songs.data : [];
-        for (const candidate of candidates) {
-          const score = scoreCandidate(track, candidate);
-          if (!best || score > best.score) {
-            best = { ...candidate, score };
-          }
-        }
-        if (best && best.score >= 0.78) break;
+      if (!queries.length) {
+        return null;
       }
 
-      return best && best.score >= 0.55 ? best : null;
+      best = scoreCandidates(track, await searchAppleSongs(music, storefront, queries[0], searchCache));
+      if (best && best.score >= FALLBACK_MATCH_SCORE) {
+        return best.score >= ACCEPT_MATCH_SCORE ? best : null;
+      }
+
+      const fallbackQueries = queries.slice(1);
+      if (fallbackQueries.length) {
+        const fallbackResults = await Promise.all(
+          fallbackQueries.map((query) => searchAppleSongs(music, storefront, query, searchCache))
+        );
+        for (const candidates of fallbackResults) {
+          const candidateBest = scoreCandidates(track, candidates);
+          if (candidateBest && (!best || candidateBest.score > best.score)) {
+            best = candidateBest;
+          }
+          if (best && best.score >= STRONG_MATCH_SCORE) {
+            break;
+          }
+        }
+      }
+
+      return best && best.score >= ACCEPT_MATCH_SCORE ? best : null;
+    }
+
+    async function searchAppleSongs(music, storefront, query, searchCache) {
+      const cacheKey = storefront + ":" + normalizeText(query);
+      if (!searchCache.has(cacheKey)) {
+        searchCache.set(cacheKey, searchAppleSongsDirect(storefront, query).catch(() => searchAppleSongsWithMusicKit(music, storefront, query)));
+      }
+
+      return searchCache.get(cacheKey);
+    }
+
+    async function searchAppleSongsDirect(storefront, query) {
+      const params = new URLSearchParams({
+        term: query,
+        types: "songs",
+        limit: String(SEARCH_RESULT_LIMIT)
+      });
+      const response = await fetch("https://api.music.apple.com/v1/catalog/" + encodeURIComponent(storefront) + "/search?" + params.toString(), {
+        headers: {
+          Authorization: "Bearer " + state.developerToken
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error("Apple catalog search failed: " + response.status);
+      }
+
+      const payload = await response.json();
+      return payload && payload.results && payload.results.songs && Array.isArray(payload.results.songs.data)
+        ? payload.results.songs.data
+        : [];
+    }
+
+    async function searchAppleSongsWithMusicKit(music, storefront, query) {
+      const results = await music.api.search(query, {
+        types: "songs",
+        limit: SEARCH_RESULT_LIMIT,
+        storefront
+      });
+      return results && results.songs && Array.isArray(results.songs.data) ? results.songs.data : [];
+    }
+
+    function scoreCandidates(track, candidates) {
+      let best = null;
+      for (const candidate of candidates) {
+        const score = scoreCandidate(track, candidate);
+        if (!best || score > best.score) {
+          best = { ...candidate, score };
+        }
+      }
+      return best;
     }
 
     function buildSearchQueries(track) {
