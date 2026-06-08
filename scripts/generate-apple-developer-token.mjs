@@ -138,7 +138,7 @@ function fail(message) {
 
 function printHelp() {
   console.log(`Usage:
-  node scripts/generate-apple-developer-token.mjs --team-id TEAM_ID --private-key ~/share/AuthKey_95R65A42C9.p8
+  node scripts/generate-apple-developer-token.mjs --team-id TEAM_ID --private-key ~/share/AuthKey_<KEY_ID>.p8
 
 Options:
   --team-id TEAM_ID        Apple Developer Team ID.

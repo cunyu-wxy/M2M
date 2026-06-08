@@ -711,7 +711,7 @@ export function renderAppHtml() {
         <div class="mark">M2M</div>
         <div>
           <h1>M2M</h1>
-          <p class="subtitle">网易云歌单迁移到 Apple Music</p>
+          <p class="subtitle">中文音乐平台歌单迁移到 Apple Music</p>
         </div>
       </div>
       <span class="badge" id="appStatus">等待链接</span>
@@ -721,16 +721,16 @@ export function renderAppHtml() {
       <section class="panel main-panel">
         <div class="view active" id="viewInput">
           <form class="entry" id="playlistForm">
-            <p class="eyebrow">NetEase to Apple Music</p>
+            <p class="eyebrow">Playlist to Apple Music</p>
             <h2>把公开歌单迁移到你的 Apple Music 资料库。</h2>
-            <p class="entry-copy">粘贴网易云分享短链或 music.163.com 歌单链接。解析任务会先进入服务器队列；Apple ID 授权只在浏览器中完成。</p>
+            <p class="entry-copy">粘贴网易云、QQ 音乐、酷狗音乐或酷我音乐的公开歌单链接。解析任务会先进入服务器队列；Apple ID 授权只在浏览器中完成。</p>
             <div class="input-row">
-              <input id="playlistUrl" type="url" required placeholder="https://163cn.tv/8kPnBRH" autocomplete="off">
+              <input id="playlistUrl" type="url" required placeholder="粘贴歌单分享链接" autocomplete="off">
               <button class="button" type="submit">开始迁移</button>
             </div>
             <div class="help-list" aria-label="迁移说明">
               <div class="help-item">
-                <p class="help-title">先解析网易云</p>
+                <p class="help-title">先解析歌单</p>
                 <p class="help-copy">读取歌名、歌手、专辑和曲目顺序，完成后可以先检查列表。</p>
               </div>
               <div class="help-item">
@@ -785,7 +785,7 @@ export function renderAppHtml() {
             <div class="status-header">
               <div>
                 <p class="eyebrow">解析阶段</p>
-                <h2>读取网易云歌单。</h2>
+                <h2>读取音乐平台歌单。</h2>
                 <p class="section-copy">解析完成后会展示曲目明细，确认无误再连接 Apple Music。</p>
               </div>
               <span class="badge warn" id="parseStageBadge">准备解析</span>
@@ -874,7 +874,7 @@ export function renderAppHtml() {
 
       <aside class="panel side-panel">
         <div class="stepper">
-          <div class="step active" data-step="input"><div class="step-dot">1</div><div><p class="step-title">输入链接</p><p class="step-note">粘贴网易云歌单 URL</p></div></div>
+          <div class="step active" data-step="input"><div class="step-dot">1</div><div><p class="step-title">输入链接</p><p class="step-note">粘贴公开歌单 URL</p></div></div>
           <div class="step" data-step="queue"><div class="step-dot">2</div><div><p class="step-title">服务器排队</p><p class="step-note">保护免费 Worker 解析额度</p></div></div>
           <div class="step" data-step="parse"><div class="step-dot">3</div><div><p class="step-title">解析歌单</p><p class="step-note">实时读取歌名和歌手</p></div></div>
           <div class="step" data-step="auth"><div class="step-dot">4</div><div><p class="step-title">连接 Apple</p><p class="step-note">浏览器内完成授权</p></div></div>
@@ -890,7 +890,7 @@ export function renderAppHtml() {
 
         <div class="side-section">
           <p class="side-title">隐私边界</p>
-          <p class="side-copy">后端负责解析公开网易云歌单和提供站点级 Apple Developer Token；你的 Apple ID 授权留在浏览器。</p>
+          <p class="side-copy">后端负责解析公开歌单和提供站点级 Apple Developer Token；你的 Apple ID 授权留在浏览器。</p>
         </div>
       </aside>
     </div>
@@ -1112,12 +1112,12 @@ export function renderAppHtml() {
       elements.appStatus.className = "badge warn";
       setParseProgress(4, "提交解析任务");
       heartbeatQueue(4, "提交解析任务");
-      addLog(elements.parseLog, "已获得解析名额，开始读取网易云歌单");
+      addLog(elements.parseLog, "已获得解析名额，开始读取歌单");
       showView("parse");
 
       let completed = false;
       try {
-        const response = await fetch("/netease/playlist/stream", {
+        const response = await fetch("/playlist/stream", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1380,7 +1380,7 @@ export function renderAppHtml() {
     function handleParseProgress(event) {
       if (event.stage === "resolve" && event.status === "running") {
         setParseProgress(8, "解析短链接");
-        addLog(elements.parseLog, "正在解析短链接或歌单 ID");
+        addLog(elements.parseLog, "正在解析链接或歌单 ID");
       }
       if (event.stage === "resolve" && event.status === "complete") {
         setParseProgress(18, "已识别歌单 ID " + event.playlistId);
@@ -1394,7 +1394,13 @@ export function renderAppHtml() {
         elements.metricTotal.textContent = String(event.trackCount || event.requestedTrackCount || 0);
         elements.metricPlaylist.textContent = shortText(event.playlistName || "-", 10);
         setParseProgress(34, "歌单曲目：" + event.requestedTrackCount);
-        addLog(elements.parseLog, "歌单：" + event.playlistName + "，曲目 " + event.requestedTrackCount + " 首");
+        addLog(
+          elements.parseLog,
+          (event.sourceName || "来源平台") + "歌单：" + event.playlistName + "，解析 " + event.requestedTrackCount + " 首"
+        );
+        if (event.limited) {
+          addLog(elements.parseLog, "当前平台只返回了部分公开曲目，结果已标记为 limited");
+        }
       }
       if (event.stage === "song_details") {
         const total = event.totalCount || 0;
@@ -1529,8 +1535,8 @@ export function renderAppHtml() {
     }
 
     function populatePlaylistName(sourceName) {
-      const safeName = normalizePlaylistName(sourceName || "网易云歌单");
-      elements.applePlaylistName.value = safeName || "网易云歌单";
+      const safeName = normalizePlaylistName(sourceName || "导入歌单");
+      elements.applePlaylistName.value = safeName || "导入歌单";
       validatePlaylistNameInput(false);
     }
 
@@ -1615,7 +1621,12 @@ export function renderAppHtml() {
 
       setImportProgress(72, "创建 Apple Music 歌单");
       await waitForImportTurn();
-      const playlistId = await createApplePlaylist(playlistName, state.developerToken, state.musicUserToken);
+      const playlistId = await createApplePlaylist(
+        playlistName,
+        state.developerToken,
+        state.musicUserToken,
+        parsed.source && parsed.source.name
+      );
       addLog(elements.importLog, "Apple Music 歌单已创建：" + playlistName);
 
       setImportProgress(78, "载入匹配歌曲");
@@ -1960,14 +1971,14 @@ export function renderAppHtml() {
       return overlap / Math.max(leftTokens.size, rightTokens.size);
     }
 
-    async function createApplePlaylist(name, developerToken, musicUserToken) {
+    async function createApplePlaylist(name, developerToken, musicUserToken, sourceName) {
       const response = await fetch("https://api.music.apple.com/v1/me/library/playlists", {
         method: "POST",
         headers: appleHeaders(developerToken, musicUserToken),
         body: JSON.stringify({
           attributes: {
             name,
-            description: "Imported from NetEase Cloud Music by M2M."
+            description: "Imported from " + (sourceName || "a music playlist") + " by M2M."
           }
         })
       });
@@ -2185,7 +2196,8 @@ export function renderAppHtml() {
       const blob = new Blob([JSON.stringify(state.parsed, null, 2)], { type: "application/json" });
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
-      link.download = "m2m-netease-playlist-" + state.parsed.playlist.id + ".json";
+      const sourceKey = state.parsed.source && state.parsed.source.key ? state.parsed.source.key : "playlist";
+      link.download = "m2m-" + sourceKey + "-playlist-" + state.parsed.playlist.id + ".json";
       link.click();
       URL.revokeObjectURL(link.href);
     }

@@ -1,6 +1,6 @@
 import { AppleError, createAppleDeveloperToken, hasAppleCredentials } from "./apple.js";
 import { renderAppHtml } from "./frontend.js";
-import { NeteaseError, extractNeteasePlaylist } from "./netease.js";
+import { PlaylistError, SUPPORTED_SOURCES, extractPlaylist, isPlaylistError } from "./playlist.js";
 export { QueueCoordinator } from "./queue.js";
 
 const corsBaseHeaders = {
@@ -40,10 +40,13 @@ export default {
             "/queue/status",
             "/queue/heartbeat",
             "/queue/leave",
+            "/playlist",
+            "/playlist/stream",
             "/netease/playlist",
             "/netease/playlist/stream",
             "/apple/developer-token"
           ],
+          supportedSources: SUPPORTED_SOURCES,
           appleConfigured: hasAppleCredentials(env),
           queueConfigured: hasQueueBinding(env)
         }, 200, request, env);
@@ -53,12 +56,15 @@ export default {
         return withResponseHeaders(await handleQueue(request, env, requestUrl), request, env);
       }
 
-      if (requestUrl.pathname === "/netease/playlist") {
-        return await handleNeteasePlaylist(request, env, requestUrl);
+      if (requestUrl.pathname === "/playlist" || requestUrl.pathname === "/netease/playlist") {
+        return await handlePlaylist(request, env, requestUrl);
       }
 
-      if (requestUrl.pathname === "/netease/playlist/stream") {
-        return await handleNeteasePlaylistStream(request, env, requestUrl);
+      if (
+        requestUrl.pathname === "/playlist/stream" ||
+        requestUrl.pathname === "/netease/playlist/stream"
+      ) {
+        return await handlePlaylistStream(request, env, requestUrl);
       }
 
       if (requestUrl.pathname === "/apple/developer-token") {
@@ -77,7 +83,7 @@ export default {
   }
 };
 
-async function handleNeteasePlaylist(request, env, requestUrl) {
+async function handlePlaylist(request, env, requestUrl) {
   if (request.method !== "GET" && request.method !== "POST") {
     return jsonResponse(
       { error: { code: "method_not_allowed", message: "Use GET or POST." } },
@@ -93,7 +99,7 @@ async function handleNeteasePlaylist(request, env, requestUrl) {
 
   if (!sourceUrl) {
     return jsonResponse(
-      { error: { code: "missing_url", message: "Missing NetEase playlist URL." } },
+      { error: { code: "missing_url", message: "Missing playlist URL." } },
       400,
       request,
       env
@@ -107,16 +113,17 @@ async function handleNeteasePlaylist(request, env, requestUrl) {
     statusText: "准备解析歌单"
   });
 
-  const result = await extractNeteasePlaylist(sourceUrl, {
+  const result = await extractPlaylist(sourceUrl, {
     limit,
-    maxTracks: parseOptionalInteger(env.NETEASE_MAX_TRACKS) || 2000,
+    maxTracks:
+      parseOptionalInteger(env.PLAYLIST_MAX_TRACKS) || parseOptionalInteger(env.NETEASE_MAX_TRACKS) || 2000,
     batchSize: parseOptionalInteger(env.NETEASE_BATCH_SIZE) || 200
   });
 
   return jsonResponse(result, 200, request, env);
 }
 
-async function handleNeteasePlaylistStream(request, env, requestUrl) {
+async function handlePlaylistStream(request, env, requestUrl) {
   if (request.method !== "GET" && request.method !== "POST") {
     return jsonResponse(
       { error: { code: "method_not_allowed", message: "Use GET or POST." } },
@@ -147,12 +154,15 @@ async function handleNeteasePlaylistStream(request, env, requestUrl) {
       (async () => {
         try {
           if (!sourceUrl) {
-            throw new NeteaseError(400, "missing_url", "Missing NetEase playlist URL.");
+            throw new PlaylistError(400, "missing_url", "Missing playlist URL.");
           }
 
-          const result = await extractNeteasePlaylist(sourceUrl, {
+          const result = await extractPlaylist(sourceUrl, {
             limit,
-            maxTracks: parseOptionalInteger(env.NETEASE_MAX_TRACKS) || 2000,
+            maxTracks:
+              parseOptionalInteger(env.PLAYLIST_MAX_TRACKS) ||
+              parseOptionalInteger(env.NETEASE_MAX_TRACKS) ||
+              2000,
             batchSize: parseOptionalInteger(env.NETEASE_BATCH_SIZE) || 200,
             onProgress: (event) => send("progress", event)
           });
@@ -208,7 +218,7 @@ async function requireActiveQueueSlot(env, payload) {
   }
 
   if (!payload.ticketId || !payload.clientId) {
-    throw new NeteaseError(
+    throw new PlaylistError(
       429,
       "queue_required",
       "Join the server queue before parsing a playlist."
@@ -217,7 +227,7 @@ async function requireActiveQueueSlot(env, payload) {
 
   const queueStatus = await queueJsonRequest(env, "/heartbeat", payload);
   if (queueStatus.status !== "active") {
-    throw new NeteaseError(
+    throw new PlaylistError(
       429,
       "queue_waiting",
       "This parse task is still waiting in the server queue.",
@@ -270,7 +280,7 @@ async function readJsonBody(request) {
   try {
     return await request.json();
   } catch {
-    throw new NeteaseError(400, "invalid_json", "Request body must be valid JSON.");
+    throw new PlaylistError(400, "invalid_json", "Request body must be valid JSON.");
   }
 }
 
@@ -307,7 +317,7 @@ function jsonResponse(body, status = 200, request = null, env = null) {
 }
 
 function errorResponse(error, request = null, env = null) {
-  if (error instanceof NeteaseError || error instanceof AppleError) {
+  if (isPlaylistError(error) || error instanceof AppleError) {
     return jsonResponse(
       {
         error: {
@@ -377,7 +387,7 @@ function corsHeadersFor(request, env) {
 }
 
 function serializeError(error) {
-  if (error instanceof NeteaseError || error instanceof AppleError) {
+  if (isPlaylistError(error) || error instanceof AppleError) {
     return {
       code: error.code,
       message: error.message,

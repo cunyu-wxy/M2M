@@ -1,12 +1,12 @@
 # M2M
 
-M2M is a Cloudflare Worker app for reading a NetEase Cloud Music playlist URL and preparing or importing it into Apple Music. The root page serves the browser UI, and the API routes provide playlist parsing and Apple Music token support.
+M2M is a Cloudflare Worker app for reading public playlist URLs from NetEase Cloud Music, QQ Music, Kugou, and Kuwo, then preparing or importing them into Apple Music. The root page serves the browser UI, and the API routes provide playlist parsing and Apple Music token support.
 
 ## Frontend flow
 
 The homepage implements this flow:
 
-- Input a NetEase Cloud Music playlist URL.
+- Input a public playlist URL from NetEase Cloud Music, QQ Music, Kugou, or Kuwo.
 - Join the Worker-side parsing queue before server work starts.
 - Show realtime parsing progress from the Worker with Server-Sent Events.
 - Display the parsed track table when parsing finishes.
@@ -16,17 +16,24 @@ The homepage implements this flow:
 
 ## API
 
-### `GET /netease/playlist`
+### `GET /playlist`
 
 Query parameters:
 
-- `url`: NetEase Cloud Music playlist URL or short URL.
+- `url`: Supported public playlist URL.
 - `limit`: Optional track limit for testing.
+
+Supported sources:
+
+- NetEase Cloud Music: `music.163.com`, `y.music.163.com`, `163cn.tv`.
+- QQ Music: `y.qq.com` playlist URLs with `id` or `disstid`.
+- Kugou: `m.kugou.com/songlist/...` share URLs. Current public share pages may expose only preview tracks; responses are marked `limited` when this happens.
+- Kuwo: `m.kuwo.cn` or `www.kuwo.cn` playlist detail URLs.
 
 Example:
 
 ```sh
-curl "https://YOUR_WORKER.workers.dev/netease/playlist?url=https%3A%2F%2F163cn.tv%2F8kPnBRH"
+curl "https://YOUR_WORKER.workers.dev/playlist?url=https%3A%2F%2F163cn.tv%2F8kPnBRH"
 ```
 
 Response shape:
@@ -35,6 +42,10 @@ Response shape:
 {
   "sourceUrl": "https://163cn.tv/8kPnBRH",
   "resolvedUrl": "https://music.163.com/playlist?id=486271477",
+  "source": {
+    "key": "netease",
+    "name": "网易云音乐"
+  },
   "playlist": {
     "id": 486271477,
     "name": "playlist name",
@@ -57,6 +68,10 @@ Response shape:
 
 ### `POST /netease/playlist`
 
+Legacy alias for `POST /playlist`.
+
+### `POST /playlist`
+
 Body:
 
 ```json
@@ -68,10 +83,14 @@ Body:
 
 ### `POST /netease/playlist/stream`
 
+Legacy alias for `POST /playlist/stream`.
+
+### `POST /playlist/stream`
+
 Streams parser progress with Server-Sent Events. The browser UI uses POST so the playlist URL and queue ticket are not placed in the request URL.
 
 ```sh
-curl -N -X POST "https://YOUR_WORKER.workers.dev/netease/playlist/stream" \
+curl -N -X POST "https://YOUR_WORKER.workers.dev/playlist/stream" \
   -H "Content-Type: application/json" \
   --data '{
     "url": "https://163cn.tv/8kPnBRH",
@@ -87,7 +106,7 @@ Events:
 - `done`: final playlist payload.
 - `app-error`: normalized error payload.
 
-`GET /netease/playlist/stream` is still accepted for compatibility, but it should not be used by the browser UI because URLs can be captured in request logs.
+`GET /playlist/stream` and the legacy NetEase stream route are still accepted for compatibility, but they should not be used by the browser UI because URLs can be captured in request logs.
 
 ### `GET /apple/developer-token`
 
@@ -127,7 +146,7 @@ npm run dev
 Then open:
 
 ```sh
-curl "http://localhost:8787/netease/playlist?url=https%3A%2F%2F163cn.tv%2F8kPnBRH&limit=10"
+curl "http://localhost:8787/playlist?url=https%3A%2F%2F163cn.tv%2F8kPnBRH&limit=10"
 ```
 
 For Apple Music import with automatic signing, set site-level app secrets in `.dev.vars`:
@@ -206,4 +225,4 @@ If you prefer Cloudflare's dashboard integration, connect GitHub in Cloudflare, 
 
 ## Worker limits
 
-`wrangler.toml` sets `NETEASE_MAX_TRACKS` to `2000`. Increase it only after adding queueing, retry, and progress tracking, because very large playlists create many upstream requests.
+`wrangler.toml` sets `NETEASE_MAX_TRACKS` to `2000`; `PLAYLIST_MAX_TRACKS` can be used as a future generic override. Increase limits only after validating queueing, retry, and progress tracking, because very large playlists create many upstream requests.
