@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "apple:token": "node scripts/generate-apple-developer-token.mjs",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "test": "node --test test/*.test.js"

@@ -134,6 +134,25 @@ To avoid storing the private key in Cloudflare, set only a pre-signed token:
 APPLE_DEVELOPER_TOKEN=eyJhbGciOiJFUzI1NiIsImtpZCI6...
 ```
 
+Generate that token locally:
+
+```sh
+npm run --silent apple:token -- \
+  --team-id YOUR_APPLE_TEAM_ID \
+  --private-key ~/share/AuthKey_95R65A42C9.p8
+```
+
+The script infers `APPLE_KEY_ID` as `95R65A42C9` from the file name. The `.p8` private key stays outside the repository.
+
+To inspect the expiry without printing only the raw token:
+
+```sh
+npm run --silent apple:token -- \
+  --team-id YOUR_APPLE_TEAM_ID \
+  --private-key ~/share/AuthKey_95R65A42C9.p8 \
+  --json
+```
+
 ## Deploy with GitHub Actions
 
 This repository includes `.github/workflows/deploy-worker.yml`.
@@ -158,6 +177,14 @@ Or use a pre-signed developer token and renew it before expiry:
 ```sh
 npx wrangler secret put APPLE_DEVELOPER_TOKEN
 ```
+
+After setting the secret, check:
+
+```sh
+curl https://YOUR_WORKER.workers.dev/health
+```
+
+`appleConfigured` should be `true`.
 
 ## Deploy with Cloudflare Git integration
 
