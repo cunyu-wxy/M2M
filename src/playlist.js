@@ -26,6 +26,8 @@ const KUWO_HEADERS = {
   Referer: "https://www.kuwo.cn/"
 };
 
+const KUGOU_HOSTS = new Set(["m.kugou.com", "www.kugou.com", "m3ws.kugou.com"]);
+
 const SOURCE_META = {
   netease: { key: "netease", name: "网易云音乐" },
   qq: { key: "qq", name: "QQ 音乐" },
@@ -107,7 +109,7 @@ export function detectPlaylistSource(input) {
   if (host === "y.qq.com" || host === "c.y.qq.com" || host === "i.y.qq.com") {
     return SOURCE_META.qq;
   }
-  if (host === "m.kugou.com" || host === "www.kugou.com" || host === "m3ws.kugou.com") {
+  if (KUGOU_HOSTS.has(host) || /^t\d*\.kugou\.com$/.test(host)) {
     return SOURCE_META.kugou;
   }
   if (host === "m.kuwo.cn" || host === "www.kuwo.cn" || host === "kuwo.cn") {
@@ -367,19 +369,45 @@ async function extractKugouPlaylist(input, options) {
 }
 
 function extractKugouOutput(html) {
-  const marker = "window.$output";
+  const mobileOutput = extractKugouAssignedJson(html, "window.$output");
+  if (mobileOutput) {
+    return mobileOutput;
+  }
+
+  const desktopOutput = extractKugouAssignedJson(html, "var nData");
+  if (desktopOutput) {
+    return {
+      encode_gic: desktopOutput.listinfo ? desktopOutput.listinfo.encode_gcid : null,
+      global_collection_id: desktopOutput.listinfo ? desktopOutput.listinfo.global_collection_id : null,
+      info: {
+        listinfo: desktopOutput.listinfo || {},
+        songs: Array.isArray(desktopOutput.songs) ? desktopOutput.songs : []
+      }
+    };
+  }
+
+  throw new PlaylistError(502, "invalid_playlist", "Kugou did not include playlist data in the share page.");
+}
+
+function extractKugouAssignedJson(html, marker) {
   const markerIndex = html.indexOf(marker);
   if (markerIndex < 0) {
-    throw new PlaylistError(502, "invalid_playlist", "Kugou did not include playlist data in the share page.");
+    return null;
   }
 
   const equalsIndex = html.indexOf("=", markerIndex);
-  const scriptEndIndex = html.indexOf("</script>", equalsIndex);
-  if (equalsIndex < 0 || scriptEndIndex < 0) {
+  if (equalsIndex < 0) {
     throw new PlaylistError(502, "invalid_playlist", "Kugou playlist data was truncated.");
   }
 
-  const jsonText = html.slice(equalsIndex + 1, scriptEndIndex).trim().replace(/;\s*$/, "");
+  const scriptEndIndex = html.indexOf("</script>", equalsIndex);
+  const searchEndIndex = scriptEndIndex < 0 ? html.length : scriptEndIndex;
+  const jsonStartIndex = html.indexOf("{", equalsIndex);
+  if (jsonStartIndex < 0 || jsonStartIndex > searchEndIndex) {
+    throw new PlaylistError(502, "invalid_playlist", "Kugou playlist data was truncated.");
+  }
+
+  const jsonText = extractBalancedJsonText(html, jsonStartIndex, searchEndIndex);
   try {
     return JSON.parse(jsonText);
   } catch (error) {
@@ -387,6 +415,39 @@ function extractKugouOutput(html) {
       message: error.message
     });
   }
+}
+
+function extractBalancedJsonText(text, startIndex, endIndex) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = startIndex; index < endIndex; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+    } else if (char === "{" || char === "[") {
+      depth += 1;
+    } else if (char === "}" || char === "]") {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(startIndex, index + 1);
+      }
+    }
+  }
+
+  throw new PlaylistError(502, "invalid_playlist", "Kugou playlist data was truncated.");
 }
 
 function normalizeKugouTrack(song, index) {
@@ -609,6 +670,16 @@ export function extractQqPlaylistId(input) {
 
 export function extractKugouPlaylistId(input) {
   const text = safeDecodeURIComponent(String(input || "").trim());
+  try {
+    const url = new URL(text);
+    if (/^t\d*\.kugou\.com$/.test(url.hostname.toLowerCase())) {
+      const shortCode = url.pathname.split("/").filter(Boolean)[0];
+      if (shortCode) return shortCode;
+    }
+  } catch {
+    // Fall back to regex extraction below.
+  }
+
   const pathMatch = text.match(/\/songlist\/([^/?#]+)/i);
   if (pathMatch) return pathMatch[1];
 

@@ -27,7 +27,7 @@ Supported sources:
 
 - NetEase Cloud Music: `music.163.com`, `y.music.163.com`, `163cn.tv`.
 - QQ Music: `y.qq.com` playlist URLs with `id` or `disstid`.
-- Kugou: `m.kugou.com/songlist/...` share URLs. Current public share pages may expose only preview tracks; responses are marked `limited` when this happens.
+- Kugou: `m.kugou.com/songlist/...`, `www.kugou.com/songlist/...`, and `t*.kugou.com` share URLs. Current public share pages may expose only preview tracks; responses are marked `limited` when this happens.
 - Kuwo: `m.kuwo.cn` or `www.kuwo.cn` playlist detail URLs.
 
 Example:

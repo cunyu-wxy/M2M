@@ -13,12 +13,14 @@ test("detects supported playlist sources", () => {
   assert.equal(detectPlaylistSource("https://163cn.tv/8kPnBRH").key, "netease");
   assert.equal(detectPlaylistSource("https://y.qq.com/n3/other/pages/details/playlist.html?id=9380721229").key, "qq");
   assert.equal(detectPlaylistSource("https://m.kugou.com/songlist/gcid_3z164xx12zaz078/").key, "kugou");
+  assert.equal(detectPlaylistSource("https://t1.kugou.com/2Atzja1G2V2").key, "kugou");
   assert.equal(detectPlaylistSource("https://m.kuwo.cn/newh5app/playlist_detail/3222204231").key, "kuwo");
 });
 
 test("extracts platform playlist IDs", () => {
   assert.equal(extractQqPlaylistId("https://y.qq.com/n3/other/pages/details/playlist.html?id=9380721229"), "9380721229");
   assert.equal(extractKugouPlaylistId("https://m.kugou.com/songlist/gcid_3z164xx12zaz078/?src_cid=3z164xx12zaz078"), "gcid_3z164xx12zaz078");
+  assert.equal(extractKugouPlaylistId("https://t1.kugou.com/2Atzja1G2V2"), "2Atzja1G2V2");
   assert.equal(extractKuwoPlaylistId("https://m.kuwo.cn/newh5app/playlist_detail/3222204231?t=sinawb"), "3222204231");
 });
 
@@ -82,7 +84,7 @@ test("extracts Kugou preview tracks from share page data", async () => {
         }
       ]
     }
-  })}; </script>`;
+  })}; window.KgMobileShare = true; </script>`;
   const result = await extractPlaylist("https://m.kugou.com/songlist/gcid_abc/", {
     fetcher: async () => new Response(html)
   });
@@ -92,6 +94,36 @@ test("extracts Kugou preview tracks from share page data", async () => {
   assert.equal(result.playlist.trackCount, 2);
   assert.deepEqual(result.tracks[0].artists, ["歌手A"]);
   assert.equal(result.tracks[0].name, "歌曲A");
+});
+
+test("extracts Kugou desktop share page data", async () => {
+  const html = `<!doctype html><script> var nData=${JSON.stringify({
+    listinfo: {
+      encode_gcid: "gcid_desktop",
+      global_collection_id: "collection_desktop",
+      name: "桌面歌单",
+      count: 1,
+      list_create_username: "酷狗用户",
+      pic: "http://c1.kgimg.com/stdmusic/{size}/cover.jpg"
+    },
+    songs: [
+      {
+        hash: "HASH_DESKTOP",
+        name: "歌手B - 歌曲B",
+        singerinfo: [{ name: "歌手B" }],
+        albuminfo: { name: "专辑B" },
+        timelen: 180000
+      }
+    ]
+  })}; window.KgPcShare = true; </script>`;
+  const result = await extractPlaylist("https://t1.kugou.com/2Atzja1G2V2", {
+    fetcher: async () => new Response(html, { url: "https://www.kugou.com/songlist/gcid_desktop/" })
+  });
+
+  assert.equal(result.source.key, "kugou");
+  assert.equal(result.playlist.name, "桌面歌单");
+  assert.equal(result.playlist.id, "collection_desktop");
+  assert.equal(result.tracks[0].name, "歌曲B");
 });
 
 test("extracts Kuwo playlists with a fake fetcher", async () => {
