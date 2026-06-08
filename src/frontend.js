@@ -550,7 +550,23 @@ export function renderAppHtml() {
               <div class="metric"><p class="metric-label">失败</p><p class="metric-value" id="importFailed">0</p></div>
             </div>
             <div class="log" id="importLog"></div>
+            <section class="failed-panel" id="failedPanel" hidden>
+              <div class="status-line">
+                <span>失败歌曲</span>
+                <span id="failedListCount">0</span>
+              </div>
+              <div class="table-wrap failed-table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>#</th><th>歌名</th><th>歌手</th><th>原因</th></tr>
+                  </thead>
+                  <tbody id="failedTrackTable"></tbody>
+                </table>
+              </div>
+            </section>
             <div class="toolbar">
+              <button class="button secondary" id="pauseImport" type="button" disabled>暂停</button>
+              <button class="button secondary" id="cancelImport" type="button" disabled>停止</button>
               <button class="button secondary" id="returnToParsed" type="button">返回歌单</button>
             </div>
           </section>
@@ -591,6 +607,8 @@ export function renderAppHtml() {
       developerToken: null,
       musicUserToken: null,
       importRows: [],
+      importControl: null,
+      failedTracks: new Map(),
       parseStartedAt: 0,
       appleConfigured: null
     };
@@ -626,6 +644,11 @@ export function renderAppHtml() {
       importSucceeded: document.getElementById("importSucceeded"),
       importFailed: document.getElementById("importFailed"),
       importLog: document.getElementById("importLog"),
+      failedPanel: document.getElementById("failedPanel"),
+      failedListCount: document.getElementById("failedListCount"),
+      failedTrackTable: document.getElementById("failedTrackTable"),
+      pauseImport: document.getElementById("pauseImport"),
+      cancelImport: document.getElementById("cancelImport"),
       returnToParsed: document.getElementById("returnToParsed"),
       modal: document.getElementById("modal"),
       modalTitle: document.getElementById("modalTitle"),
@@ -643,6 +666,8 @@ export function renderAppHtml() {
     elements.connectApple.addEventListener("click", () => connectAppleMusic());
     elements.downloadJson.addEventListener("click", () => downloadParsedJson());
     elements.backToInput.addEventListener("click", () => resetToInput());
+    elements.pauseImport.addEventListener("click", () => toggleImportPause());
+    elements.cancelImport.addEventListener("click", () => cancelImport());
     elements.returnToParsed.addEventListener("click", () => showView("parse"));
     elements.modalClose.addEventListener("click", () => elements.modal.classList.remove("active"));
     refreshHealth();
@@ -797,6 +822,7 @@ export function renderAppHtml() {
         showView("import");
         setImportProgress(0, "准备 Apple Music 授权");
         resetImportMetrics();
+        startImportControl();
         addLog(elements.importLog, "请求 Apple Music Developer Token");
 
         const tokenResponse = await fetch("/apple/developer-token");
@@ -819,9 +845,18 @@ export function renderAppHtml() {
         addLog(elements.importLog, "授权完成，开始匹配歌曲");
         await importToAppleMusic(music, state.parsed);
       } catch (error) {
-        elements.appStatus.textContent = "Apple 失败";
-        elements.appStatus.className = "badge fail";
-        showError("Apple Music 连接失败", error.message || "无法连接 Apple Music。");
+        if (error && error.name === "ImportCanceledError") {
+          elements.appStatus.textContent = "已停止";
+          elements.appStatus.className = "badge warn";
+          setImportProgress(Number.parseInt(elements.importPercent.textContent, 10) || 0, "已停止");
+          addLog(elements.importLog, "导入已停止");
+        } else {
+          elements.appStatus.textContent = "Apple 失败";
+          elements.appStatus.className = "badge fail";
+          showError("Apple Music 连接失败", error.message || "无法连接 Apple Music。");
+        }
+      } finally {
+        finishImportControl();
       }
     }
 
@@ -895,10 +930,12 @@ export function renderAppHtml() {
       }
 
       setImportProgress(72, "创建 Apple Music 歌单");
+      await waitForImportTurn();
       const playlistId = await createApplePlaylist(parsed.playlist.name, state.developerToken, state.musicUserToken);
       addLog(elements.importLog, "Apple Music 歌单已创建");
 
       setImportProgress(78, "载入匹配歌曲");
+      await waitForImportTurn();
       const importResult = await addTracksToApplePlaylist(
         playlistId,
         matchedRows,
@@ -931,14 +968,24 @@ export function renderAppHtml() {
 
       async function runWorker() {
         while (nextIndex < tracks.length) {
+          try {
+            await waitForImportTurn();
+          } catch (error) {
+            if (error && error.name === "ImportCanceledError") {
+              return;
+            }
+            throw error;
+          }
           const trackIndex = nextIndex;
           nextIndex += 1;
           const track = tracks[trackIndex];
           let match = null;
+          let failureReason = "Apple Music 未找到匹配";
 
           try {
             match = await findAppleSong(music, storefront, track, searchCache);
           } catch (error) {
+            failureReason = "搜索失败：" + readableError(error);
             console.warn("Apple Music search failed", error);
           }
 
@@ -948,8 +995,9 @@ export function renderAppHtml() {
             setTrackStatus(track.id, "已匹配", "ok");
           } else {
             failed += 1;
-            rows[trackIndex] = { source: track, apple: null, status: "not_found" };
+            rows[trackIndex] = { source: track, apple: null, status: "not_found", reason: failureReason };
             setTrackStatus(track.id, "未找到", "fail");
+            recordFailedTrack(track, failureReason);
           }
 
           completed += 1;
@@ -959,6 +1007,9 @@ export function renderAppHtml() {
 
       const workerCount = Math.min(MATCH_CONCURRENCY, tracks.length);
       await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+      if (state.importControl && state.importControl.canceled) {
+        throw createImportCanceledError();
+      }
       return { rows, matched, failed };
     }
 
@@ -1137,6 +1188,7 @@ export function renderAppHtml() {
       const chunkSize = 50;
 
       for (let index = 0; index < rows.length; index += chunkSize) {
+        await waitForImportTurn();
         const chunk = rows.slice(index, index + chunkSize);
         try {
           await addAppleTrackChunk(playlistId, chunk, developerToken, musicUserToken);
@@ -1145,6 +1197,7 @@ export function renderAppHtml() {
           for (const row of chunk) setTrackStatus(row.source.id, "已载入", "ok");
         } catch {
           for (const row of chunk) {
+            await waitForImportTurn();
             try {
               await addAppleTrackChunk(playlistId, [row], developerToken, musicUserToken);
               succeeded += 1;
@@ -1152,6 +1205,7 @@ export function renderAppHtml() {
             } catch {
               failed += 1;
               setTrackStatus(row.source.id, "载入失败", "fail");
+              recordFailedTrack(row.source, "载入 Apple 歌单失败");
             }
             processed += 1;
             onProgress({ processed, succeeded, failed });
@@ -1189,11 +1243,16 @@ export function renderAppHtml() {
 
     function resetImportMetrics() {
       elements.importLog.innerHTML = "";
+      state.failedTracks = new Map();
+      elements.failedTrackTable.innerHTML = "";
+      elements.failedListCount.textContent = "0";
+      elements.failedPanel.hidden = true;
       elements.importTotal.textContent = "0";
       elements.importMatched.textContent = "0";
       elements.importSucceeded.textContent = "0";
       elements.importFailed.textContent = "0";
       setImportProgress(0, "等待授权");
+      updateImportControlButtons();
     }
 
     function setImportProgress(percent, text) {
@@ -1207,6 +1266,96 @@ export function renderAppHtml() {
       if (!badge) return;
       badge.textContent = label;
       badge.className = "badge " + type;
+    }
+
+    function startImportControl() {
+      state.importControl = {
+        running: true,
+        paused: false,
+        canceled: false
+      };
+      updateImportControlButtons();
+    }
+
+    function finishImportControl() {
+      if (state.importControl) {
+        state.importControl.running = false;
+        state.importControl.paused = false;
+      }
+      updateImportControlButtons();
+    }
+
+    function toggleImportPause() {
+      const control = state.importControl;
+      if (!control || !control.running || control.canceled) return;
+      control.paused = !control.paused;
+      updateImportControlButtons();
+      addLog(elements.importLog, control.paused ? "导入已暂停，当前请求完成后停止推进" : "导入已继续");
+      if (control.paused) {
+        setImportProgress(Number.parseInt(elements.importPercent.textContent, 10) || 0, "已暂停");
+      }
+    }
+
+    function cancelImport() {
+      const control = state.importControl;
+      if (!control || !control.running) return;
+      control.canceled = true;
+      control.paused = false;
+      updateImportControlButtons();
+      addLog(elements.importLog, "正在停止导入，当前请求完成后退出");
+    }
+
+    function updateImportControlButtons() {
+      const control = state.importControl;
+      const running = Boolean(control && control.running && !control.canceled);
+      elements.pauseImport.disabled = !running;
+      elements.cancelImport.disabled = !running;
+      elements.pauseImport.textContent = control && control.paused ? "继续" : "暂停";
+    }
+
+    async function waitForImportTurn() {
+      const control = state.importControl;
+      if (!control) return;
+
+      while (control.paused && !control.canceled) {
+        await wait(200);
+      }
+
+      if (control.canceled) {
+        throw createImportCanceledError();
+      }
+    }
+
+    function createImportCanceledError() {
+      const error = new Error("导入已停止");
+      error.name = "ImportCanceledError";
+      return error;
+    }
+
+    function recordFailedTrack(track, reason) {
+      const key = String(track.id);
+      state.failedTracks.set(key, {
+        index: track.index,
+        name: track.name || "",
+        artists: track.artists.join(" / "),
+        reason
+      });
+
+      renderFailedTracks();
+    }
+
+    function renderFailedTracks() {
+      const failures = Array.from(state.failedTracks.values()).sort((left, right) => left.index - right.index);
+      elements.failedPanel.hidden = failures.length === 0;
+      elements.failedListCount.textContent = String(failures.length);
+      elements.failedTrackTable.innerHTML = failures.map((track) => {
+        return "<tr>" +
+          "<td>" + track.index + "</td>" +
+          "<td>" + escapeHtml(track.name) + "</td>" +
+          "<td>" + escapeHtml(track.artists) + "</td>" +
+          "<td class=\\"muted\\">" + escapeHtml(track.reason) + "</td>" +
+        "</tr>";
+      }).join("");
     }
 
     function addLog(container, text) {
@@ -1232,6 +1381,11 @@ export function renderAppHtml() {
       elements.modalTitle.textContent = title;
       elements.modalMessage.textContent = message;
       elements.modal.classList.add("active");
+    }
+
+    function readableError(error) {
+      if (!error) return "未知错误";
+      return error.message || String(error);
     }
 
     function shortText(text, maxLength) {
