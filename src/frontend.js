@@ -9,18 +9,26 @@ export function renderAppHtml() {
   <style>
     :root {
       color-scheme: light;
-      --bg: #f7f8fa;
+      --bg: #f5f6f7;
       --surface: #ffffff;
-      --surface-2: #eef3f7;
-      --text: #18212c;
-      --muted: #647385;
-      --line: #d9e0e8;
-      --accent: #0f766e;
-      --accent-strong: #115e59;
+      --surface-2: #f0f2f4;
+      --ink: #17191f;
+      --text: #2b3038;
+      --muted: #69717d;
+      --faint: #8b949e;
+      --line: #d9dee5;
+      --line-strong: #c2c9d2;
+      --accent: #d94848;
+      --accent-strong: #b83232;
+      --accent-soft: #fff0ef;
       --danger: #b42318;
-      --warning: #9a5b00;
-      --ok: #15803d;
-      --shadow: 0 12px 30px rgba(21, 31, 44, 0.08);
+      --warning: #9a6500;
+      --ok: #19734d;
+      --ok-soft: #e9f7f1;
+      --warning-soft: #fff5dc;
+      --danger-soft: #fdebea;
+      --shadow: 0 18px 44px rgba(23, 25, 31, 0.08);
+      --radius: 8px;
     }
 
     * { box-sizing: border-box; }
@@ -29,7 +37,9 @@ export function renderAppHtml() {
       margin: 0;
       min-height: 100vh;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: var(--bg);
+      background:
+        linear-gradient(180deg, #ffffff 0, var(--bg) 320px),
+        var(--bg);
       color: var(--text);
       letter-spacing: 0;
     }
@@ -39,19 +49,23 @@ export function renderAppHtml() {
       letter-spacing: 0;
     }
 
+    button {
+      -webkit-tap-highlight-color: transparent;
+    }
+
     .app {
-      width: min(1120px, calc(100vw - 32px));
+      width: min(1180px, calc(100vw - 40px));
       margin: 0 auto;
-      padding: 28px 0 48px;
+      padding: 24px 0 46px;
     }
 
     .topbar {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 16px;
-      min-height: 52px;
-      margin-bottom: 22px;
+      gap: 18px;
+      min-height: 56px;
+      margin-bottom: 24px;
     }
 
     .brand {
@@ -62,21 +76,36 @@ export function renderAppHtml() {
     }
 
     .mark {
+      position: relative;
       display: grid;
       place-items: center;
-      width: 38px;
-      height: 38px;
-      border-radius: 8px;
-      background: var(--text);
+      width: 42px;
+      height: 42px;
+      border-radius: var(--radius);
+      background: var(--ink);
       color: #fff;
-      font-weight: 800;
+      font-size: 12px;
+      font-weight: 820;
+    }
+
+    .mark::after {
+      content: "";
+      position: absolute;
+      right: -4px;
+      bottom: 7px;
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--accent);
+      border: 2px solid #fff;
     }
 
     h1 {
       margin: 0;
-      font-size: 22px;
-      line-height: 1.2;
-      font-weight: 750;
+      color: var(--ink);
+      font-size: 21px;
+      line-height: 1.15;
+      font-weight: 780;
     }
 
     .subtitle {
@@ -87,164 +116,187 @@ export function renderAppHtml() {
 
     .layout {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 330px;
-      gap: 18px;
+      grid-template-columns: minmax(0, 1fr) 324px;
+      gap: 22px;
       align-items: start;
     }
 
     .panel {
-      background: var(--surface);
+      background: rgba(255, 255, 255, 0.9);
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: var(--radius);
       box-shadow: var(--shadow);
     }
 
     .main-panel {
-      min-height: 620px;
-      padding: 22px;
+      min-height: 650px;
+      padding: 0;
+      overflow: hidden;
     }
 
     .side-panel {
-      padding: 18px;
       position: sticky;
       top: 18px;
-    }
-
-    .stepper {
       display: grid;
-      gap: 10px;
-    }
-
-    .step {
-      display: grid;
-      grid-template-columns: 28px 1fr;
-      gap: 10px;
-      align-items: start;
-      min-height: 42px;
-      color: var(--muted);
-    }
-
-    .step-dot {
-      display: grid;
-      place-items: center;
-      width: 28px;
-      height: 28px;
-      border-radius: 999px;
-      border: 1px solid var(--line);
-      background: var(--surface);
-      font-size: 12px;
-      font-weight: 750;
-    }
-
-    .step.active .step-dot {
-      border-color: var(--accent);
-      background: #dff5ef;
-      color: var(--accent-strong);
-    }
-
-    .step.done .step-dot {
-      border-color: var(--ok);
-      background: #e6f7ec;
-      color: var(--ok);
-    }
-
-    .step-title {
-      margin: 0;
-      color: var(--text);
-      font-size: 14px;
-      font-weight: 700;
-    }
-
-    .step-note {
-      margin: 3px 0 0;
-      font-size: 12px;
+      gap: 22px;
+      padding: 20px;
+      box-shadow: none;
     }
 
     .view {
       display: none;
+      min-height: 650px;
+      animation: view-in 180ms ease-out;
     }
 
     .view.active {
       display: block;
     }
 
-    .entry {
+    @keyframes view-in {
+      from { opacity: 0; transform: translateY(5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .entry, .queue-view, .workspace {
       display: grid;
-      gap: 18px;
-      max-width: 740px;
+      gap: 22px;
+      padding: 34px;
     }
 
-    .entry h2, .workspace h2 {
+    .entry {
+      align-content: center;
+      min-height: 650px;
+      max-width: 840px;
+    }
+
+    .workspace {
+      align-content: start;
+    }
+
+    .eyebrow {
       margin: 0;
-      font-size: 28px;
-      line-height: 1.2;
+      color: var(--accent-strong);
+      font-size: 12px;
+      font-weight: 780;
+      text-transform: uppercase;
     }
 
-    .entry-copy {
+    .entry h2, .workspace h2, .queue-view h2 {
+      margin: 0;
+      color: var(--ink);
+      font-size: clamp(28px, 4vw, 46px);
+      line-height: 1.04;
+      font-weight: 820;
+      max-width: 720px;
+    }
+
+    .workspace h2, .queue-view h2 {
+      font-size: clamp(24px, 3vw, 34px);
+      line-height: 1.12;
+    }
+
+    .entry-copy, .section-copy {
       margin: 0;
       color: var(--muted);
-      line-height: 1.7;
-      max-width: 680px;
+      line-height: 1.75;
+      max-width: 720px;
     }
 
     .input-row {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
       gap: 10px;
+      width: min(780px, 100%);
       margin-top: 4px;
     }
 
     input[type="url"], input[type="text"] {
       min-width: 0;
-      height: 46px;
-      border-radius: 8px;
-      border: 1px solid var(--line);
+      height: 48px;
+      border-radius: var(--radius);
+      border: 1px solid var(--line-strong);
       padding: 0 14px;
       background: #fff;
-      color: var(--text);
+      color: var(--ink);
       outline: none;
     }
 
     input:focus {
       border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.13);
+      box-shadow: 0 0 0 3px rgba(217, 72, 72, 0.14);
     }
 
     .button {
       min-height: 42px;
       border: 1px solid transparent;
-      border-radius: 8px;
+      border-radius: var(--radius);
       padding: 0 16px;
       background: var(--accent);
       color: #fff;
-      font-weight: 720;
+      font-weight: 760;
       cursor: pointer;
       white-space: nowrap;
+      transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
     }
 
     .button:hover {
       background: var(--accent-strong);
+      transform: translateY(-1px);
     }
 
     .button:disabled {
       cursor: not-allowed;
       opacity: 0.58;
+      transform: none;
     }
 
     .button.secondary {
       background: #fff;
-      border-color: var(--line);
-      color: var(--text);
+      border-color: var(--line-strong);
+      color: var(--ink);
     }
 
     .button.secondary:hover {
-      border-color: #b8c4d1;
-      background: var(--surface-2);
+      border-color: var(--ink);
+      background: #fff;
     }
 
-    .workspace {
+    .help-list {
       display: grid;
-      gap: 18px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      max-width: 840px;
+    }
+
+    .help-item {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .help-title {
+      margin: 0;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 760;
+    }
+
+    .help-copy {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .status-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
     }
 
     .status-line {
@@ -257,16 +309,16 @@ export function renderAppHtml() {
     }
 
     .progress-shell {
-      height: 10px;
+      height: 8px;
       overflow: hidden;
       border-radius: 999px;
       background: var(--surface-2);
-      border: 1px solid var(--line);
     }
 
     .progress-bar {
       width: 0%;
       height: 100%;
+      border-radius: inherit;
       background: var(--accent);
       transition: width 220ms ease;
     }
@@ -274,15 +326,20 @@ export function renderAppHtml() {
     .metrics {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: #fff;
     }
 
     .metric {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 12px;
-      background: #fff;
-      min-height: 76px;
+      min-height: 78px;
+      padding: 13px 14px;
+      border-right: 1px solid var(--line);
+    }
+
+    .metric:last-child {
+      border-right: 0;
     }
 
     .metric-label {
@@ -293,8 +350,10 @@ export function renderAppHtml() {
 
     .metric-value {
       margin: 0;
-      font-size: 22px;
-      font-weight: 780;
+      color: var(--ink);
+      font-size: 23px;
+      line-height: 1;
+      font-weight: 820;
     }
 
     .toolbar {
@@ -307,7 +366,7 @@ export function renderAppHtml() {
     .table-wrap {
       overflow: auto;
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: var(--radius);
       background: #fff;
       max-height: 420px;
     }
@@ -330,10 +389,10 @@ export function renderAppHtml() {
       position: sticky;
       top: 0;
       z-index: 1;
-      background: #f8fafc;
+      background: #f7f8f9;
       color: var(--muted);
       font-size: 12px;
-      font-weight: 750;
+      font-weight: 760;
     }
 
     tr:last-child td {
@@ -347,12 +406,10 @@ export function renderAppHtml() {
     .log {
       display: grid;
       gap: 8px;
-      max-height: 180px;
+      max-height: 178px;
       overflow: auto;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 12px;
-      background: #fbfcfd;
+      border-left: 2px solid var(--line-strong);
+      padding: 2px 0 2px 13px;
       font-size: 13px;
       color: var(--muted);
     }
@@ -364,32 +421,156 @@ export function renderAppHtml() {
       min-height: 18px;
     }
 
+    .failed-panel {
+      display: grid;
+      gap: 12px;
+      padding-top: 4px;
+    }
+
+    .failed-panel[hidden] {
+      display: none;
+    }
+
     .badge {
       display: inline-flex;
       align-items: center;
-      min-height: 24px;
+      min-height: 26px;
       border-radius: 999px;
-      padding: 0 9px;
+      padding: 0 10px;
       background: var(--surface-2);
       color: var(--muted);
       font-size: 12px;
-      font-weight: 700;
+      font-weight: 760;
       white-space: nowrap;
     }
 
     .badge.ok {
-      background: #e6f7ec;
+      background: var(--ok-soft);
       color: var(--ok);
     }
 
     .badge.fail {
-      background: #fdecea;
+      background: var(--danger-soft);
       color: var(--danger);
     }
 
     .badge.warn {
-      background: #fff3d8;
+      background: var(--warning-soft);
       color: var(--warning);
+    }
+
+    .stepper {
+      display: grid;
+      gap: 2px;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 24px 1fr;
+      gap: 10px;
+      align-items: start;
+      min-height: 48px;
+      color: var(--muted);
+    }
+
+    .step-dot {
+      display: grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      border: 1px solid var(--line-strong);
+      background: #fff;
+      font-size: 11px;
+      font-weight: 820;
+    }
+
+    .step.active .step-dot {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+    }
+
+    .step.done .step-dot {
+      border-color: var(--ok);
+      background: var(--ok-soft);
+      color: var(--ok);
+    }
+
+    .step-title {
+      margin: 0;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 760;
+    }
+
+    .step-note {
+      margin: 3px 0 0;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .side-section {
+      display: grid;
+      gap: 10px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+    }
+
+    .side-title {
+      margin: 0;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 780;
+    }
+
+    .side-copy {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.65;
+    }
+
+    .queue-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--line);
+    }
+
+    .queue-cell {
+      min-height: 88px;
+      padding: 14px;
+      background: #fff;
+    }
+
+    .queue-label {
+      margin: 0 0 7px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .queue-value {
+      margin: 0;
+      color: var(--ink);
+      font-size: 26px;
+      line-height: 1;
+      font-weight: 820;
+    }
+
+    .queue-note {
+      margin: 6px 0 0;
+      color: var(--faint);
+      font-size: 12px;
+    }
+
+    .queue-meter {
+      display: grid;
+      gap: 8px;
+      max-width: 680px;
     }
 
     .modal {
@@ -398,7 +579,7 @@ export function renderAppHtml() {
       display: none;
       place-items: center;
       padding: 18px;
-      background: rgba(24, 33, 44, 0.36);
+      background: rgba(23, 25, 31, 0.38);
       z-index: 20;
     }
 
@@ -408,22 +589,23 @@ export function renderAppHtml() {
 
     .dialog {
       width: min(520px, 100%);
-      border-radius: 8px;
+      border-radius: var(--radius);
       background: var(--surface);
       border: 1px solid var(--line);
-      box-shadow: 0 22px 60px rgba(21, 31, 44, 0.22);
+      box-shadow: 0 24px 64px rgba(23, 25, 31, 0.22);
       padding: 20px;
     }
 
     .dialog h3 {
       margin: 0 0 8px;
+      color: var(--ink);
       font-size: 18px;
     }
 
     .dialog p {
       margin: 0 0 16px;
       color: var(--muted);
-      line-height: 1.6;
+      line-height: 1.65;
     }
 
     .dialog-actions {
@@ -432,7 +614,7 @@ export function renderAppHtml() {
       gap: 10px;
     }
 
-    @media (max-width: 860px) {
+    @media (max-width: 940px) {
       .layout {
         grid-template-columns: 1fr;
       }
@@ -441,35 +623,55 @@ export function renderAppHtml() {
         position: static;
       }
 
-      .input-row {
-        grid-template-columns: 1fr;
+      .entry {
+        min-height: 540px;
       }
 
-      .metrics {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+      .view {
+        min-height: 540px;
       }
     }
 
-    @media (max-width: 520px) {
+    @media (max-width: 680px) {
       .app {
-        width: min(100vw - 20px, 1120px);
+        width: min(100vw - 22px, 1180px);
         padding-top: 16px;
-      }
-
-      .main-panel, .side-panel {
-        padding: 14px;
       }
 
       .topbar {
         align-items: flex-start;
       }
 
-      .entry h2, .workspace h2 {
-        font-size: 23px;
+      .entry, .queue-view, .workspace {
+        padding: 20px;
+      }
+
+      .input-row {
+        grid-template-columns: 1fr;
+      }
+
+      .help-list {
+        grid-template-columns: 1fr;
       }
 
       .metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .metric:nth-child(2) {
+        border-right: 0;
+      }
+
+      .metric:nth-child(-n+2) {
+        border-bottom: 1px solid var(--line);
+      }
+
+      .queue-grid {
         grid-template-columns: 1fr;
+      }
+
+      .status-header {
+        display: grid;
       }
     }
   </style>
@@ -491,25 +693,82 @@ export function renderAppHtml() {
       <section class="panel main-panel">
         <div class="view active" id="viewInput">
           <form class="entry" id="playlistForm">
-            <h2>输入网易云歌单链接</h2>
-            <p class="entry-copy">支持网易云分享短链和 music.163.com 歌单链接。解析完成后会展示歌名、歌手、专辑和后续导入状态。</p>
+            <p class="eyebrow">NetEase to Apple Music</p>
+            <h2>把公开歌单迁移到你的 Apple Music 资料库。</h2>
+            <p class="entry-copy">粘贴网易云分享短链或 music.163.com 歌单链接。解析任务会先进入服务器队列；Apple ID 授权只在浏览器中完成。</p>
             <div class="input-row">
               <input id="playlistUrl" type="url" required placeholder="https://163cn.tv/8kPnBRH" autocomplete="off">
-              <button class="button" type="submit">下一步</button>
+              <button class="button" type="submit">开始迁移</button>
+            </div>
+            <div class="help-list" aria-label="迁移说明">
+              <div class="help-item">
+                <p class="help-title">先解析网易云</p>
+                <p class="help-copy">读取歌名、歌手、专辑和曲目顺序，完成后可以先检查列表。</p>
+              </div>
+              <div class="help-item">
+                <p class="help-title">再连接 Apple</p>
+                <p class="help-copy">浏览器发起 MusicKit 授权，后端不接触你的 Apple ID。</p>
+              </div>
+              <div class="help-item">
+                <p class="help-title">失败可追踪</p>
+                <p class="help-copy">未匹配或载入失败的歌曲会列出名称、歌手和原因。</p>
+              </div>
             </div>
           </form>
         </div>
 
+        <div class="view" id="viewQueue">
+          <section class="queue-view">
+            <p class="eyebrow">服务器队列</p>
+            <h2>正在等待解析名额。</h2>
+            <p class="section-copy">免费 Worker 需要限制同时解析的歌单数量。轮到你后页面会自动开始解析，不需要重复点击。</p>
+            <div class="queue-grid">
+              <div class="queue-cell">
+                <p class="queue-label">当前位置</p>
+                <p class="queue-value" id="queuePosition">-</p>
+                <p class="queue-note" id="queueAhead">等待队列同步中</p>
+              </div>
+              <div class="queue-cell">
+                <p class="queue-label">预计等待</p>
+                <p class="queue-value" id="queueEta">-</p>
+                <p class="queue-note">按近期解析耗时估算</p>
+              </div>
+              <div class="queue-cell">
+                <p class="queue-label">前方进度</p>
+                <p class="queue-value" id="queueFrontProgress">-</p>
+                <p class="queue-note" id="queueActive">活跃任务同步中</p>
+              </div>
+            </div>
+            <div class="queue-meter">
+              <div class="status-line">
+                <span id="queueStatus">正在加入队列</span>
+                <span id="queuePollTime">刚刚</span>
+              </div>
+              <div class="progress-shell"><div class="progress-bar" id="queueBar"></div></div>
+            </div>
+            <div class="toolbar">
+              <button class="button secondary" id="cancelQueue" type="button">取消排队</button>
+            </div>
+          </section>
+        </div>
+
         <div class="view" id="viewParse">
           <section class="workspace">
+            <div class="status-header">
+              <div>
+                <p class="eyebrow">解析阶段</p>
+                <h2>读取网易云歌单。</h2>
+                <p class="section-copy">解析完成后会展示曲目明细，确认无误再连接 Apple Music。</p>
+              </div>
+              <span class="badge warn" id="parseStageBadge">准备解析</span>
+            </div>
             <div>
-              <h2>解析歌单</h2>
               <div class="status-line">
                 <span id="parseStatus">准备解析链接</span>
                 <span id="parsePercent">0%</span>
               </div>
+              <div class="progress-shell"><div class="progress-bar" id="parseBar"></div></div>
             </div>
-            <div class="progress-shell"><div class="progress-bar" id="parseBar"></div></div>
             <div class="metrics">
               <div class="metric"><p class="metric-label">歌单曲目</p><p class="metric-value" id="metricTotal">0</p></div>
               <div class="metric"><p class="metric-label">已解析</p><p class="metric-value" id="metricParsed">0</p></div>
@@ -535,16 +794,23 @@ export function renderAppHtml() {
 
         <div class="view" id="viewImport">
           <section class="workspace">
+            <div class="status-header">
+              <div>
+                <p class="eyebrow">Apple Music</p>
+                <h2>匹配并载入歌单。</h2>
+                <p class="section-copy">匹配、创建歌单和添加曲目会实时更新；失败歌曲会在下方保留明细。</p>
+              </div>
+              <span class="badge warn" id="importStageBadge">等待授权</span>
+            </div>
             <div>
-              <h2>载入 Apple Music</h2>
               <div class="status-line">
                 <span id="importStatus">等待授权</span>
                 <span id="importPercent">0%</span>
               </div>
+              <div class="progress-shell"><div class="progress-bar" id="importBar"></div></div>
             </div>
-            <div class="progress-shell"><div class="progress-bar" id="importBar"></div></div>
             <div class="metrics">
-              <div class="metric"><p class="metric-label">总进度</p><p class="metric-value" id="importTotal">0</p></div>
+              <div class="metric"><p class="metric-label">总曲目</p><p class="metric-value" id="importTotal">0</p></div>
               <div class="metric"><p class="metric-label">匹配成功</p><p class="metric-value" id="importMatched">0</p></div>
               <div class="metric"><p class="metric-label">载入成功</p><p class="metric-value" id="importSucceeded">0</p></div>
               <div class="metric"><p class="metric-label">失败</p><p class="metric-value" id="importFailed">0</p></div>
@@ -575,10 +841,23 @@ export function renderAppHtml() {
 
       <aside class="panel side-panel">
         <div class="stepper">
-          <div class="step active" data-step="input"><div class="step-dot">1</div><div><p class="step-title">输入链接</p><p class="step-note">网易云歌单 URL</p></div></div>
-          <div class="step" data-step="parse"><div class="step-dot">2</div><div><p class="step-title">解析歌单</p><p class="step-note">后端实时返回进度</p></div></div>
-          <div class="step" data-step="auth"><div class="step-dot">3</div><div><p class="step-title">连接 Apple</p><p class="step-note">MusicKit 授权</p></div></div>
-          <div class="step" data-step="import"><div class="step-dot">4</div><div><p class="step-title">载入歌单</p><p class="step-note">匹配、创建、添加</p></div></div>
+          <div class="step active" data-step="input"><div class="step-dot">1</div><div><p class="step-title">输入链接</p><p class="step-note">粘贴网易云歌单 URL</p></div></div>
+          <div class="step" data-step="queue"><div class="step-dot">2</div><div><p class="step-title">服务器排队</p><p class="step-note">保护免费 Worker 解析额度</p></div></div>
+          <div class="step" data-step="parse"><div class="step-dot">3</div><div><p class="step-title">解析歌单</p><p class="step-note">实时读取歌名和歌手</p></div></div>
+          <div class="step" data-step="auth"><div class="step-dot">4</div><div><p class="step-title">连接 Apple</p><p class="step-note">浏览器内完成授权</p></div></div>
+          <div class="step" data-step="import"><div class="step-dot">5</div><div><p class="step-title">载入歌单</p><p class="step-note">显示成功和失败明细</p></div></div>
+        </div>
+
+        <div class="side-section">
+          <p class="side-title">服务器状态</p>
+          <p class="side-copy" id="sideQueueStatus">队列状态会在开始迁移后显示。</p>
+          <p class="side-copy"><span id="sideQueueActive">0/0</span> 个解析名额使用中，<span id="sideQueueWaiting">0</span> 个任务等待。</p>
+          <p class="side-copy">预计等待：<span id="sideQueueEta">-</span></p>
+        </div>
+
+        <div class="side-section">
+          <p class="side-title">隐私边界</p>
+          <p class="side-copy">后端负责解析公开网易云歌单和提供站点级 Apple Developer Token；你的 Apple ID 授权留在浏览器。</p>
         </div>
       </aside>
     </div>
@@ -600,6 +879,8 @@ export function renderAppHtml() {
     const STRONG_MATCH_SCORE = 0.78;
     const FALLBACK_MATCH_SCORE = 0.7;
     const ACCEPT_MATCH_SCORE = 0.55;
+    const QUEUE_POLL_MS = 3000;
+    const QUEUE_HEARTBEAT_MS = 12000;
 
     const state = {
       playlistUrl: "",
@@ -610,21 +891,42 @@ export function renderAppHtml() {
       importControl: null,
       failedTracks: new Map(),
       parseStartedAt: 0,
-      appleConfigured: null
+      parseProgress: 0,
+      parseStatusText: "准备解析链接",
+      appleConfigured: null,
+      queueConfigured: null,
+      clientId: getClientId(),
+      queue: {
+        ticketId: "",
+        canceled: false,
+        pollTimer: null,
+        heartbeatTimer: null
+      }
     };
 
     const elements = {
       appStatus: document.getElementById("appStatus"),
       views: {
         input: document.getElementById("viewInput"),
+        queue: document.getElementById("viewQueue"),
         parse: document.getElementById("viewParse"),
         import: document.getElementById("viewImport")
       },
       playlistForm: document.getElementById("playlistForm"),
       playlistUrl: document.getElementById("playlistUrl"),
+      queuePosition: document.getElementById("queuePosition"),
+      queueAhead: document.getElementById("queueAhead"),
+      queueEta: document.getElementById("queueEta"),
+      queueFrontProgress: document.getElementById("queueFrontProgress"),
+      queueActive: document.getElementById("queueActive"),
+      queueStatus: document.getElementById("queueStatus"),
+      queuePollTime: document.getElementById("queuePollTime"),
+      queueBar: document.getElementById("queueBar"),
+      cancelQueue: document.getElementById("cancelQueue"),
       parseStatus: document.getElementById("parseStatus"),
       parsePercent: document.getElementById("parsePercent"),
       parseBar: document.getElementById("parseBar"),
+      parseStageBadge: document.getElementById("parseStageBadge"),
       metricTotal: document.getElementById("metricTotal"),
       metricParsed: document.getElementById("metricParsed"),
       metricMissing: document.getElementById("metricMissing"),
@@ -639,6 +941,7 @@ export function renderAppHtml() {
       importStatus: document.getElementById("importStatus"),
       importPercent: document.getElementById("importPercent"),
       importBar: document.getElementById("importBar"),
+      importStageBadge: document.getElementById("importStageBadge"),
       importTotal: document.getElementById("importTotal"),
       importMatched: document.getElementById("importMatched"),
       importSucceeded: document.getElementById("importSucceeded"),
@@ -653,7 +956,11 @@ export function renderAppHtml() {
       modal: document.getElementById("modal"),
       modalTitle: document.getElementById("modalTitle"),
       modalMessage: document.getElementById("modalMessage"),
-      modalClose: document.getElementById("modalClose")
+      modalClose: document.getElementById("modalClose"),
+      sideQueueStatus: document.getElementById("sideQueueStatus"),
+      sideQueueActive: document.getElementById("sideQueueActive"),
+      sideQueueWaiting: document.getElementById("sideQueueWaiting"),
+      sideQueueEta: document.getElementById("sideQueueEta")
     };
 
     elements.playlistForm.addEventListener("submit", (event) => {
@@ -666,10 +973,12 @@ export function renderAppHtml() {
     elements.connectApple.addEventListener("click", () => connectAppleMusic());
     elements.downloadJson.addEventListener("click", () => downloadParsedJson());
     elements.backToInput.addEventListener("click", () => resetToInput());
+    elements.cancelQueue.addEventListener("click", () => cancelQueue());
     elements.pauseImport.addEventListener("click", () => toggleImportPause());
     elements.cancelImport.addEventListener("click", () => cancelImport());
     elements.returnToParsed.addEventListener("click", () => showView("parse"));
     elements.modalClose.addEventListener("click", () => elements.modal.classList.remove("active"));
+    window.addEventListener("beforeunload", () => releaseQueue("page_unload", true));
     refreshHealth();
 
     function showView(name) {
@@ -680,7 +989,13 @@ export function renderAppHtml() {
     }
 
     function updateSteps(view) {
-      const order = view === "input" ? ["input"] : view === "parse" ? ["input", "parse"] : ["input", "parse", "auth", "import"];
+      const order = view === "input"
+        ? ["input"]
+        : view === "queue"
+          ? ["input", "queue"]
+          : view === "parse"
+            ? ["input", "queue", "parse"]
+            : ["input", "queue", "parse", "auth", "import"];
       document.querySelectorAll(".step").forEach((step) => {
         const key = step.dataset.step;
         const active = key === order[order.length - 1];
@@ -691,7 +1006,10 @@ export function renderAppHtml() {
     }
 
     function resetToInput() {
+      releaseQueue("reset");
       state.parsed = null;
+      state.parseProgress = 0;
+      state.parseStatusText = "准备解析链接";
       elements.parseLog.innerHTML = "";
       elements.trackTable.innerHTML = "";
       elements.afterParseActions.hidden = true;
@@ -702,10 +1020,12 @@ export function renderAppHtml() {
       elements.appStatus.className = "badge";
     }
 
-    function parsePlaylist(url) {
+    async function parsePlaylist(url) {
       state.playlistUrl = url;
       state.parseStartedAt = Date.now();
       state.parsed = null;
+      state.parseProgress = 0;
+      state.parseStatusText = "等待服务器解析名额";
       elements.parseLog.innerHTML = "";
       elements.trackTable.innerHTML = "";
       elements.afterParseActions.hidden = true;
@@ -714,13 +1034,44 @@ export function renderAppHtml() {
       elements.metricParsed.textContent = "0";
       elements.metricMissing.textContent = "0";
       elements.metricPlaylist.textContent = "-";
+      elements.appStatus.textContent = "排队中";
+      elements.appStatus.className = "badge warn";
+      setParseProgress(0, "等待服务器解析名额");
+      showView("queue");
+
+      try {
+        const queueStatus = await joinQueue();
+        updateQueueUi(queueStatus);
+        if (queueStatus.status !== "active") {
+          await waitForQueueTurn();
+        }
+        if (state.queue.canceled) {
+          return;
+        }
+        startQueueHeartbeat();
+        beginPlaylistStream(url);
+      } catch (error) {
+        elements.appStatus.textContent = "排队失败";
+        elements.appStatus.className = "badge fail";
+        showError("服务器队列失败", error.message || "无法加入服务器队列，请稍后重试。");
+        resetToInput();
+      }
+    }
+
+    function beginPlaylistStream(url) {
       elements.appStatus.textContent = "解析中";
       elements.appStatus.className = "badge warn";
       setParseProgress(4, "提交解析任务");
-      addLog(elements.parseLog, "已提交网易云链接");
+      heartbeatQueue(4, "提交解析任务");
+      addLog(elements.parseLog, "已获得解析名额，开始读取网易云歌单");
       showView("parse");
 
-      const streamUrl = "/netease/playlist/stream?url=" + encodeURIComponent(url);
+      const streamUrl = "/netease/playlist/stream?url=" +
+        encodeURIComponent(url) +
+        "&ticketId=" +
+        encodeURIComponent(state.queue.ticketId) +
+        "&clientId=" +
+        encodeURIComponent(state.clientId);
       const eventSource = new EventSource(streamUrl);
 
       eventSource.addEventListener("progress", (event) => {
@@ -741,6 +1092,7 @@ export function renderAppHtml() {
         elements.appStatus.textContent = "解析完成";
         elements.appStatus.className = "badge ok";
         addLog(elements.parseLog, "解析完成，共 " + result.extractedCount + " 首");
+        releaseQueue("parse_complete");
       });
 
       eventSource.addEventListener("app-error", (event) => {
@@ -748,6 +1100,7 @@ export function renderAppHtml() {
         const message = event.data ? JSON.parse(event.data).message : "解析连接中断，请稍后重试。";
         elements.appStatus.textContent = "解析失败";
         elements.appStatus.className = "badge fail";
+        releaseQueue("parse_error");
         showError("解析失败", message);
       });
 
@@ -755,8 +1108,161 @@ export function renderAppHtml() {
         eventSource.close();
         elements.appStatus.textContent = "解析失败";
         elements.appStatus.className = "badge fail";
+        releaseQueue("parse_disconnect");
         showError("解析失败", "解析连接中断，请稍后重试。");
       };
+    }
+
+    async function joinQueue() {
+      clearQueueTimers();
+      state.queue.canceled = false;
+      state.queue.ticketId = "";
+      const queueStatus = await queueRequest("join", {
+        clientId: state.clientId,
+        statusText: "等待服务器解析名额",
+        progress: 0
+      });
+      state.queue.ticketId = queueStatus.ticketId || "";
+      return queueStatus;
+    }
+
+    async function waitForQueueTurn() {
+      while (!state.queue.canceled) {
+        await wait(QUEUE_POLL_MS);
+        const queueStatus = await queueRequest("status", {
+          clientId: state.clientId,
+          ticketId: state.queue.ticketId
+        });
+        updateQueueUi(queueStatus);
+
+        if (queueStatus.status === "active") {
+          return queueStatus;
+        }
+
+        if (queueStatus.status === "missing") {
+          throw new Error("排队状态已过期，请重新开始。");
+        }
+      }
+
+      throw new Error("已取消排队。");
+    }
+
+    function startQueueHeartbeat() {
+      clearQueueTimers();
+      state.queue.heartbeatTimer = window.setInterval(() => {
+        heartbeatQueue(state.parseProgress, state.parseStatusText);
+      }, QUEUE_HEARTBEAT_MS);
+    }
+
+    async function heartbeatQueue(progress, statusText) {
+      if (!state.queue.ticketId || state.queue.canceled) return;
+      try {
+        const queueStatus = await queueRequest("heartbeat", {
+          clientId: state.clientId,
+          ticketId: state.queue.ticketId,
+          progress,
+          statusText
+        });
+        updateQueueUi(queueStatus);
+      } catch {
+        // A missed heartbeat should not interrupt an active SSE parse.
+      }
+    }
+
+    async function cancelQueue() {
+      state.queue.canceled = true;
+      await releaseQueue("cancel_queue");
+      resetToInput();
+    }
+
+    async function releaseQueue(reason, useBeacon = false) {
+      clearQueueTimers();
+      if (!state.queue.ticketId) return;
+
+      const payload = {
+        clientId: state.clientId,
+        ticketId: state.queue.ticketId,
+        reason
+      };
+      const ticketId = state.queue.ticketId;
+      state.queue.ticketId = "";
+
+      if (useBeacon && navigator.sendBeacon) {
+        const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+        navigator.sendBeacon("/queue/leave", blob);
+        return;
+      }
+
+      try {
+        const queueStatus = await queueRequest("leave", payload);
+        updateQueueUi({ ...queueStatus, ticketId });
+      } catch {
+        // Leaving the queue is best-effort; stale entries expire by heartbeat TTL.
+      }
+    }
+
+    function clearQueueTimers() {
+      if (state.queue.pollTimer) {
+        window.clearInterval(state.queue.pollTimer);
+        state.queue.pollTimer = null;
+      }
+      if (state.queue.heartbeatTimer) {
+        window.clearInterval(state.queue.heartbeatTimer);
+        state.queue.heartbeatTimer = null;
+      }
+    }
+
+    async function queueRequest(action, payload) {
+      const response = await fetch("/queue/" + action, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const queueStatus = await response.json();
+      if (!response.ok || queueStatus.status === "error") {
+        const message =
+          queueStatus.error && queueStatus.error.message
+            ? queueStatus.error.message
+            : "服务器队列请求失败。";
+        throw new Error(message);
+      }
+      return queueStatus;
+    }
+
+    function updateQueueUi(queueStatus) {
+      state.queueConfigured = queueStatus.queueDisabled ? false : state.queueConfigured;
+      const activeCount = queueStatus.activeCount || 0;
+      const maxActive = queueStatus.maxActive || 0;
+      const waitingCount = queueStatus.waitingCount || 0;
+      const eta = queueStatus.etaSeconds ? formatDuration(queueStatus.etaSeconds) : "马上";
+      const frontProgress = Number.isFinite(queueStatus.frontProgress) ? queueStatus.frontProgress : 0;
+
+      elements.queuePosition.textContent =
+        queueStatus.status === "active" ? "已进入" : queueStatus.position ? String(queueStatus.position) : "-";
+      elements.queueAhead.textContent =
+        queueStatus.status === "active"
+          ? "已获得服务器解析名额"
+          : "前方还有 " + (queueStatus.ahead || 0) + " 个排队任务";
+      elements.queueEta.textContent = queueStatus.status === "active" ? "马上" : eta;
+      elements.queueFrontProgress.textContent = frontProgress + "%";
+      elements.queueActive.textContent = activeCount + "/" + maxActive + " 个名额使用中";
+      elements.queueStatus.textContent =
+        queueStatus.status === "active"
+          ? "轮到你了，正在启动解析"
+          : queueStatus.queueDisabled
+            ? "当前部署未启用队列，直接解析"
+            : "正在等待服务器解析名额";
+      elements.queuePollTime.textContent = "刚刚同步";
+      elements.queueBar.style.width = Math.max(0, Math.min(frontProgress, 100)) + "%";
+      elements.sideQueueStatus.textContent =
+        queueStatus.queueDisabled
+          ? "当前部署未启用队列，提交后直接解析。"
+          : queueStatus.status === "active"
+            ? "当前任务正在使用解析名额。"
+            : "当前任务正在等待解析名额。";
+      elements.sideQueueActive.textContent = activeCount + "/" + maxActive;
+      elements.sideQueueWaiting.textContent = String(waitingCount);
+      elements.sideQueueEta.textContent = queueStatus.status === "active" ? "马上" : eta;
     }
 
     function handleParseProgress(event) {
@@ -785,12 +1291,16 @@ export function renderAppHtml() {
         const percent = total ? 34 + Math.round((fetched / total) * 62) : 34;
         setParseProgress(Math.min(percent, 96), "读取歌曲详情 " + fetched + "/" + total);
       }
+      heartbeatQueue(state.parseProgress, state.parseStatusText);
     }
 
     function setParseProgress(percent, text) {
+      state.parseProgress = percent;
+      state.parseStatusText = text;
       elements.parseBar.style.width = percent + "%";
       elements.parsePercent.textContent = percent + "%";
       elements.parseStatus.textContent = text;
+      elements.parseStageBadge.textContent = shortText(text, 18);
     }
 
     function renderTracks(tracks) {
@@ -879,9 +1389,16 @@ export function renderAppHtml() {
         const response = await fetch("/health");
         const payload = await response.json();
         state.appleConfigured = Boolean(payload.appleConfigured);
+        state.queueConfigured = Boolean(payload.queueConfigured);
+        if (payload.queueConfigured) {
+          elements.sideQueueStatus.textContent = "队列已启用，开始迁移后会显示位置和等待时间。";
+        } else {
+          elements.sideQueueStatus.textContent = "队列未启用，提交后会直接解析。";
+        }
         updateAppleButton();
       } catch {
         state.appleConfigured = null;
+        state.queueConfigured = null;
       }
     }
 
@@ -1259,6 +1776,7 @@ export function renderAppHtml() {
       elements.importBar.style.width = percent + "%";
       elements.importPercent.textContent = percent + "%";
       elements.importStatus.textContent = text;
+      elements.importStageBadge.textContent = shortText(text, 18);
     }
 
     function setTrackStatus(trackId, label, type) {
@@ -1386,6 +1904,41 @@ export function renderAppHtml() {
     function readableError(error) {
       if (!error) return "未知错误";
       return error.message || String(error);
+    }
+
+    function formatDuration(seconds) {
+      const safeSeconds = Math.max(0, Math.round(Number(seconds) || 0));
+      if (safeSeconds < 60) {
+        return safeSeconds + " 秒";
+      }
+
+      const minutes = Math.floor(safeSeconds / 60);
+      const restSeconds = safeSeconds % 60;
+      return restSeconds ? minutes + " 分 " + restSeconds + " 秒" : minutes + " 分";
+    }
+
+    function getClientId() {
+      const storageKey = "m2m-client-id";
+      try {
+        const existingId = window.localStorage.getItem(storageKey);
+        if (existingId) {
+          return existingId;
+        }
+
+        const createdId = createClientId();
+        window.localStorage.setItem(storageKey, createdId);
+        return createdId;
+      } catch {
+        return createClientId();
+      }
+    }
+
+    function createClientId() {
+      if (window.crypto && window.crypto.randomUUID) {
+        return window.crypto.randomUUID();
+      }
+
+      return "client-" + Date.now() + "-" + Math.random().toString(36).slice(2);
     }
 
     function shortText(text, maxLength) {

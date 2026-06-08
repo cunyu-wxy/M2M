@@ -1,6 +1,7 @@
 import { AppleError, createAppleDeveloperToken, hasAppleCredentials } from "./apple.js";
 import { renderAppHtml } from "./frontend.js";
 import { NeteaseError, extractNeteasePlaylist } from "./netease.js";
+export { QueueCoordinator } from "./queue.js";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -25,9 +26,22 @@ export default {
       if (requestUrl.pathname === "/health") {
         return jsonResponse({
           ok: true,
-          endpoints: ["/netease/playlist", "/netease/playlist/stream", "/apple/developer-token"],
-          appleConfigured: hasAppleCredentials(env)
+          endpoints: [
+            "/queue/join",
+            "/queue/status",
+            "/queue/heartbeat",
+            "/queue/leave",
+            "/netease/playlist",
+            "/netease/playlist/stream",
+            "/apple/developer-token"
+          ],
+          appleConfigured: hasAppleCredentials(env),
+          queueConfigured: hasQueueBinding(env)
         });
+      }
+
+      if (requestUrl.pathname.startsWith("/queue/")) {
+        return await handleQueue(request, env, requestUrl);
       }
 
       if (requestUrl.pathname === "/netease/playlist") {
@@ -35,7 +49,7 @@ export default {
       }
 
       if (requestUrl.pathname === "/netease/playlist/stream") {
-        return handleNeteasePlaylistStream(request, env, requestUrl);
+        return await handleNeteasePlaylistStream(request, env, requestUrl);
       }
 
       if (requestUrl.pathname === "/apple/developer-token") {
@@ -71,6 +85,13 @@ async function handleNeteasePlaylist(request, env, requestUrl) {
     );
   }
 
+  await requireActiveQueueSlot(env, {
+    ticketId: payload.ticketId || requestUrl.searchParams.get("ticketId"),
+    clientId: payload.clientId || requestUrl.searchParams.get("clientId"),
+    progress: 2,
+    statusText: "准备解析歌单"
+  });
+
   const result = await extractNeteasePlaylist(sourceUrl, {
     limit,
     maxTracks: parseOptionalInteger(env.NETEASE_MAX_TRACKS) || 2000,
@@ -80,7 +101,7 @@ async function handleNeteasePlaylist(request, env, requestUrl) {
   return jsonResponse(result);
 }
 
-function handleNeteasePlaylistStream(request, env, requestUrl) {
+async function handleNeteasePlaylistStream(request, env, requestUrl) {
   if (request.method !== "GET") {
     return jsonResponse(
       { error: { code: "method_not_allowed", message: "Use GET." } },
@@ -90,6 +111,12 @@ function handleNeteasePlaylistStream(request, env, requestUrl) {
 
   const sourceUrl = requestUrl.searchParams.get("url");
   const limit = parseOptionalInteger(requestUrl.searchParams.get("limit"));
+  await requireActiveQueueSlot(env, {
+    ticketId: requestUrl.searchParams.get("ticketId"),
+    clientId: requestUrl.searchParams.get("clientId"),
+    progress: 2,
+    statusText: "准备解析歌单"
+  });
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     start(controller) {
@@ -128,6 +155,77 @@ function handleNeteasePlaylistStream(request, env, requestUrl) {
       "Cache-Control": "no-cache"
     }
   });
+}
+
+async function handleQueue(request, env, requestUrl) {
+  if (!hasQueueBinding(env)) {
+    return jsonResponse({
+      status: "active",
+      queueDisabled: true,
+      position: 0,
+      ahead: 0,
+      etaSeconds: 0,
+      activeCount: 0,
+      waitingCount: 0,
+      maxActive: 0,
+      averageSeconds: 0,
+      frontProgress: 100,
+      activeProgress: []
+    });
+  }
+
+  const queuePath = requestUrl.pathname.replace(/^\/queue/, "") || "/status";
+  const queueRequest = new Request("https://m2m-queue.local" + queuePath + requestUrl.search, {
+    method: request.method,
+    headers: request.headers,
+    body: request.method === "GET" || request.method === "HEAD" ? null : request.body
+  });
+  return queueObject(env).fetch(queueRequest);
+}
+
+async function requireActiveQueueSlot(env, payload) {
+  if (!hasQueueBinding(env)) {
+    return null;
+  }
+
+  if (!payload.ticketId || !payload.clientId) {
+    throw new NeteaseError(
+      429,
+      "queue_required",
+      "Join the server queue before parsing a playlist."
+    );
+  }
+
+  const queueStatus = await queueJsonRequest(env, "/heartbeat", payload);
+  if (queueStatus.status !== "active") {
+    throw new NeteaseError(
+      429,
+      "queue_waiting",
+      "This parse task is still waiting in the server queue.",
+      queueStatus
+    );
+  }
+
+  return queueStatus;
+}
+
+async function queueJsonRequest(env, path, payload) {
+  const response = await queueObject(env).fetch(
+    new Request("https://m2m-queue.local" + path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+  );
+  return response.json();
+}
+
+function queueObject(env) {
+  return env.M2M_QUEUE.get(env.M2M_QUEUE.idFromName("global"));
+}
+
+function hasQueueBinding(env) {
+  return Boolean(env && env.M2M_QUEUE);
 }
 
 async function handleAppleDeveloperToken(request, env) {

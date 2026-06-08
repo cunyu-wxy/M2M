@@ -7,3 +7,14 @@ workers_dev = true
 NETEASE_MAX_TRACKS = "2000"
 NETEASE_BATCH_SIZE = "200"
 APPLE_TOKEN_TTL_SECONDS = "43200"
+QUEUE_MAX_ACTIVE = "2"
+QUEUE_ACTIVE_TTL_SECONDS = "90"
+QUEUE_AVERAGE_SECONDS = "45"
+
+[[durable_objects.bindings]]
+name = "M2M_QUEUE"
+class_name = "QueueCoordinator"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = [ "QueueCoordinator" ]
