@@ -363,6 +363,34 @@ export function renderAppHtml() {
       gap: 10px;
     }
 
+    .playlist-name-panel {
+      display: grid;
+      gap: 8px;
+      max-width: 620px;
+      padding-top: 4px;
+    }
+
+    .playlist-name-panel[hidden] {
+      display: none;
+    }
+
+    .field-label {
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 760;
+    }
+
+    .field-hint {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .field-hint.error {
+      color: var(--danger);
+    }
+
     .table-wrap {
       overflow: auto;
       border: 1px solid var(--line);
@@ -776,6 +804,11 @@ export function renderAppHtml() {
               <div class="metric"><p class="metric-label">歌单</p><p class="metric-value" id="metricPlaylist">-</p></div>
             </div>
             <div class="log" id="parseLog"></div>
+            <div class="playlist-name-panel" id="playlistNamePanel" hidden>
+              <label class="field-label" for="applePlaylistName">Apple Music 歌单名称</label>
+              <input id="applePlaylistName" type="text" maxlength="100" autocomplete="off" placeholder="输入要创建的歌单名">
+              <p class="field-hint" id="playlistNameHint">会按这个名称创建 Apple Music 歌单。</p>
+            </div>
             <div class="toolbar" id="afterParseActions" hidden>
               <button class="button" id="connectApple" type="button">连接 Apple Music</button>
               <button class="button secondary" id="downloadJson" type="button">下载 JSON</button>
@@ -874,8 +907,13 @@ export function renderAppHtml() {
   </div>
 
   <script>
-    const MATCH_CONCURRENCY = 10;
+    const MATCH_CONCURRENCY = 5;
     const SEARCH_RESULT_LIMIT = 5;
+    const SEARCH_REQUEST_INTERVAL_MS = 180;
+    const SEARCH_MAX_RETRIES = 6;
+    const SEARCH_RETRY_BASE_MS = 1200;
+    const SEARCH_RETRY_MAX_MS = 15000;
+    const PLAYLIST_NAME_MAX_LENGTH = 100;
     const STRONG_MATCH_SCORE = 0.78;
     const FALLBACK_MATCH_SCORE = 0.7;
     const ACCEPT_MATCH_SCORE = 0.55;
@@ -890,6 +928,7 @@ export function renderAppHtml() {
       importRows: [],
       importControl: null,
       failedTracks: new Map(),
+      rateLimitNoticeAt: 0,
       parseStartedAt: 0,
       parseProgress: 0,
       parseStatusText: "准备解析链接",
@@ -933,6 +972,9 @@ export function renderAppHtml() {
       metricPlaylist: document.getElementById("metricPlaylist"),
       parseLog: document.getElementById("parseLog"),
       afterParseActions: document.getElementById("afterParseActions"),
+      playlistNamePanel: document.getElementById("playlistNamePanel"),
+      applePlaylistName: document.getElementById("applePlaylistName"),
+      playlistNameHint: document.getElementById("playlistNameHint"),
       trackTableWrap: document.getElementById("trackTableWrap"),
       trackTable: document.getElementById("trackTable"),
       connectApple: document.getElementById("connectApple"),
@@ -971,6 +1013,7 @@ export function renderAppHtml() {
     });
 
     elements.connectApple.addEventListener("click", () => connectAppleMusic());
+    elements.applePlaylistName.addEventListener("input", () => validatePlaylistNameInput(false));
     elements.downloadJson.addEventListener("click", () => downloadParsedJson());
     elements.backToInput.addEventListener("click", () => resetToInput());
     elements.cancelQueue.addEventListener("click", () => cancelQueue());
@@ -1013,6 +1056,9 @@ export function renderAppHtml() {
       elements.parseLog.innerHTML = "";
       elements.trackTable.innerHTML = "";
       elements.afterParseActions.hidden = true;
+      elements.playlistNamePanel.hidden = true;
+      elements.applePlaylistName.value = "";
+      setPlaylistNameHint("会按这个名称创建 Apple Music 歌单。", false);
       elements.trackTableWrap.hidden = true;
       setParseProgress(0, "准备解析链接");
       showView("input");
@@ -1029,6 +1075,9 @@ export function renderAppHtml() {
       elements.parseLog.innerHTML = "";
       elements.trackTable.innerHTML = "";
       elements.afterParseActions.hidden = true;
+      elements.playlistNamePanel.hidden = true;
+      elements.applePlaylistName.value = "";
+      setPlaylistNameHint("会按这个名称创建 Apple Music 歌单。", false);
       elements.trackTableWrap.hidden = true;
       elements.metricTotal.textContent = "0";
       elements.metricParsed.textContent = "0";
@@ -1083,6 +1132,8 @@ export function renderAppHtml() {
         const result = JSON.parse(event.data);
         state.parsed = result;
         renderTracks(result.tracks);
+        populatePlaylistName(result.playlist && result.playlist.name);
+        elements.playlistNamePanel.hidden = false;
         elements.afterParseActions.hidden = false;
         elements.trackTableWrap.hidden = false;
         updateAppleButton();
@@ -1318,6 +1369,11 @@ export function renderAppHtml() {
 
     async function connectAppleMusic() {
       if (!state.parsed) return;
+      const playlistNameResult = validatePlaylistNameInput(true);
+      if (!playlistNameResult.ok) {
+        return;
+      }
+
       if (state.appleConfigured === false) {
         showError(
           "Apple Music 待配置",
@@ -1353,7 +1409,7 @@ export function renderAppHtml() {
 
         setImportProgress(8, "Apple Music 已授权");
         addLog(elements.importLog, "授权完成，开始匹配歌曲");
-        await importToAppleMusic(music, state.parsed);
+        await importToAppleMusic(music, state.parsed, playlistNameResult.name);
       } catch (error) {
         if (error && error.name === "ImportCanceledError") {
           elements.appStatus.textContent = "已停止";
@@ -1411,12 +1467,62 @@ export function renderAppHtml() {
       }
     }
 
-    async function importToAppleMusic(music, parsed) {
+    function populatePlaylistName(sourceName) {
+      const safeName = normalizePlaylistName(sourceName || "网易云歌单");
+      elements.applePlaylistName.value = safeName || "网易云歌单";
+      validatePlaylistNameInput(false);
+    }
+
+    function validatePlaylistNameInput(showErrorDialog) {
+      const originalName = elements.applePlaylistName.value;
+      const normalizedName = normalizePlaylistName(originalName);
+      const length = Array.from(normalizedName).length;
+
+      if (originalName !== normalizedName) {
+        elements.applePlaylistName.value = normalizedName;
+      }
+
+      if (!normalizedName) {
+        setPlaylistNameHint("请输入 Apple Music 歌单名称。", true);
+        if (showErrorDialog) {
+          showError("歌单名称无效", "请输入 Apple Music 歌单名称。");
+          elements.applePlaylistName.focus();
+        }
+        return { ok: false, name: "" };
+      }
+
+      if (length > PLAYLIST_NAME_MAX_LENGTH) {
+        setPlaylistNameHint("歌单名称不能超过 " + PLAYLIST_NAME_MAX_LENGTH + " 个字符。", true);
+        if (showErrorDialog) {
+          showError("歌单名称过长", "请把 Apple Music 歌单名称控制在 " + PLAYLIST_NAME_MAX_LENGTH + " 个字符以内。");
+          elements.applePlaylistName.focus();
+        }
+        return { ok: false, name: "" };
+      }
+
+      setPlaylistNameHint(length + "/" + PLAYLIST_NAME_MAX_LENGTH + " 个字符；会按这个名称创建 Apple Music 歌单。", false);
+      return { ok: true, name: normalizedName };
+    }
+
+    function normalizePlaylistName(value) {
+      return String(value || "")
+        .replace(/[\\u0000-\\u001F\\u007F-\\u009F\\u202A-\\u202E\\u2066-\\u2069]/g, "")
+        .replace(/\\s+/g, " ")
+        .trim();
+    }
+
+    function setPlaylistNameHint(text, isError) {
+      elements.playlistNameHint.textContent = text;
+      elements.playlistNameHint.classList.toggle("error", isError);
+    }
+
+    async function importToAppleMusic(music, parsed, playlistName) {
       const tracks = parsed.tracks.filter((track) => !track.missing);
       const storefront = music.storefrontId || "us";
 
       elements.importTotal.textContent = String(tracks.length);
-      setImportProgress(8, "并发匹配歌曲 0/" + tracks.length);
+      state.rateLimitNoticeAt = 0;
+      setImportProgress(8, "稳态匹配歌曲 0/" + tracks.length);
 
       const matchStartedAt = Date.now();
       const matchResult = await matchAppleSongs(music, storefront, tracks, (progress) => {
@@ -1448,8 +1554,8 @@ export function renderAppHtml() {
 
       setImportProgress(72, "创建 Apple Music 歌单");
       await waitForImportTurn();
-      const playlistId = await createApplePlaylist(parsed.playlist.name, state.developerToken, state.musicUserToken);
-      addLog(elements.importLog, "Apple Music 歌单已创建");
+      const playlistId = await createApplePlaylist(playlistName, state.developerToken, state.musicUserToken);
+      addLog(elements.importLog, "Apple Music 歌单已创建：" + playlistName);
 
       setImportProgress(78, "载入匹配歌曲");
       await waitForImportTurn();
@@ -1478,6 +1584,7 @@ export function renderAppHtml() {
     async function matchAppleSongs(music, storefront, tracks, onProgress) {
       const rows = new Array(tracks.length);
       const searchCache = new Map();
+      const searchLimiter = createSearchLimiter(SEARCH_REQUEST_INTERVAL_MS);
       let nextIndex = 0;
       let completed = 0;
       let matched = 0;
@@ -1500,7 +1607,7 @@ export function renderAppHtml() {
           let failureReason = "Apple Music 未找到匹配";
 
           try {
-            match = await findAppleSong(music, storefront, track, searchCache);
+            match = await findAppleSong(music, storefront, track, searchCache, searchLimiter);
           } catch (error) {
             failureReason = "搜索失败：" + readableError(error);
             console.warn("Apple Music search failed", error);
@@ -1530,7 +1637,7 @@ export function renderAppHtml() {
       return { rows, matched, failed };
     }
 
-    async function findAppleSong(music, storefront, track, searchCache) {
+    async function findAppleSong(music, storefront, track, searchCache, searchLimiter) {
       const queries = buildSearchQueries(track);
       let best = null;
 
@@ -1538,17 +1645,15 @@ export function renderAppHtml() {
         return null;
       }
 
-      best = scoreCandidates(track, await searchAppleSongs(music, storefront, queries[0], searchCache));
+      best = scoreCandidates(track, await searchAppleSongs(music, storefront, queries[0], searchCache, searchLimiter));
       if (best && best.score >= FALLBACK_MATCH_SCORE) {
         return best.score >= ACCEPT_MATCH_SCORE ? best : null;
       }
 
       const fallbackQueries = queries.slice(1);
       if (fallbackQueries.length) {
-        const fallbackResults = await Promise.all(
-          fallbackQueries.map((query) => searchAppleSongs(music, storefront, query, searchCache))
-        );
-        for (const candidates of fallbackResults) {
+        for (const query of fallbackQueries) {
+          const candidates = await searchAppleSongs(music, storefront, query, searchCache, searchLimiter);
           const candidateBest = scoreCandidates(track, candidates);
           if (candidateBest && (!best || candidateBest.score > best.score)) {
             best = candidateBest;
@@ -1562,44 +1667,164 @@ export function renderAppHtml() {
       return best && best.score >= ACCEPT_MATCH_SCORE ? best : null;
     }
 
-    async function searchAppleSongs(music, storefront, query, searchCache) {
+    async function searchAppleSongs(music, storefront, query, searchCache, searchLimiter) {
       const cacheKey = storefront + ":" + normalizeText(query);
       if (!searchCache.has(cacheKey)) {
-        searchCache.set(cacheKey, searchAppleSongsDirect(storefront, query).catch(() => searchAppleSongsWithMusicKit(music, storefront, query)));
+        const searchPromise = searchAppleSongsDirect(storefront, query, searchLimiter).catch((error) => {
+          if (isRateLimitError(error)) {
+            throw error;
+          }
+          return searchAppleSongsWithMusicKit(music, storefront, query, searchLimiter);
+        }).catch((error) => {
+          searchCache.delete(cacheKey);
+          throw error;
+        });
+        searchCache.set(cacheKey, searchPromise);
       }
 
       return searchCache.get(cacheKey);
     }
 
-    async function searchAppleSongsDirect(storefront, query) {
+    async function searchAppleSongsDirect(storefront, query, searchLimiter) {
       const params = new URLSearchParams({
         term: query,
         types: "songs",
         limit: String(SEARCH_RESULT_LIMIT)
       });
-      const response = await fetch("https://api.music.apple.com/v1/catalog/" + encodeURIComponent(storefront) + "/search?" + params.toString(), {
-        headers: {
-          Authorization: "Bearer " + state.developerToken
+
+      return runAppleSearchWithRetry("Apple catalog search", searchLimiter, async () => {
+        const response = await fetch("https://api.music.apple.com/v1/catalog/" + encodeURIComponent(storefront) + "/search?" + params.toString(), {
+          headers: {
+            Authorization: "Bearer " + state.developerToken
+          }
+        });
+
+        if (!response.ok) {
+          throw createAppleHttpError("Apple catalog search failed", response);
         }
+
+        const payload = await response.json();
+        return payload && payload.results && payload.results.songs && Array.isArray(payload.results.songs.data)
+          ? payload.results.songs.data
+          : [];
       });
-
-      if (!response.ok) {
-        throw new Error("Apple catalog search failed: " + response.status);
-      }
-
-      const payload = await response.json();
-      return payload && payload.results && payload.results.songs && Array.isArray(payload.results.songs.data)
-        ? payload.results.songs.data
-        : [];
     }
 
-    async function searchAppleSongsWithMusicKit(music, storefront, query) {
-      const results = await music.api.search(query, {
-        types: "songs",
-        limit: SEARCH_RESULT_LIMIT,
-        storefront
+    async function searchAppleSongsWithMusicKit(music, storefront, query, searchLimiter) {
+      return runAppleSearchWithRetry("MusicKit search", searchLimiter, async () => {
+        const results = await music.api.search(query, {
+          types: "songs",
+          limit: SEARCH_RESULT_LIMIT,
+          storefront
+        });
+        return results && results.songs && Array.isArray(results.songs.data) ? results.songs.data : [];
       });
-      return results && results.songs && Array.isArray(results.songs.data) ? results.songs.data : [];
+    }
+
+    function createSearchLimiter(intervalMs) {
+      let nextAt = 0;
+
+      return {
+        async waitTurn() {
+          await waitForImportTurn();
+          const now = Date.now();
+          const waitMs = Math.max(0, nextAt - now);
+          nextAt = Math.max(nextAt, now) + intervalMs;
+          if (waitMs > 0) {
+            await waitWithImportControl(waitMs);
+          }
+        },
+        penalize(delayMs) {
+          nextAt = Math.max(nextAt, Date.now() + delayMs);
+        }
+      };
+    }
+
+    async function runAppleSearchWithRetry(label, searchLimiter, operation) {
+      let lastError = null;
+
+      for (let attempt = 0; attempt <= SEARCH_MAX_RETRIES; attempt += 1) {
+        await searchLimiter.waitTurn();
+
+        try {
+          return await operation();
+        } catch (error) {
+          lastError = error;
+          if (!shouldRetryAppleSearch(error) || attempt >= SEARCH_MAX_RETRIES) {
+            throw error;
+          }
+
+          const delayMs = appleSearchRetryDelay(error, attempt);
+          searchLimiter.penalize(delayMs);
+          noteAppleRateLimit(label, delayMs, getErrorStatus(error));
+        }
+      }
+
+      throw lastError || new Error("Apple search failed.");
+    }
+
+    function createAppleHttpError(message, response) {
+      const error = new Error(message + ": " + response.status);
+      error.status = response.status;
+      error.retryAfterMs = retryAfterMs(response);
+      return error;
+    }
+
+    function shouldRetryAppleSearch(error) {
+      const status = getErrorStatus(error);
+      return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+    }
+
+    function isRateLimitError(error) {
+      return getErrorStatus(error) === 429;
+    }
+
+    function getErrorStatus(error) {
+      if (!error) return null;
+      if (Number.isFinite(error.status)) return error.status;
+      if (Number.isFinite(error.statusCode)) return error.statusCode;
+      if (error.response && Number.isFinite(error.response.status)) return error.response.status;
+      const match = String(error.message || error).match(/\\b(429|500|502|503|504)\\b/);
+      return match ? Number.parseInt(match[1], 10) : null;
+    }
+
+    function appleSearchRetryDelay(error, attempt) {
+      if (Number.isFinite(error.retryAfterMs) && error.retryAfterMs > 0) {
+        return Math.min(error.retryAfterMs, SEARCH_RETRY_MAX_MS);
+      }
+
+      const exponentialDelay = SEARCH_RETRY_BASE_MS * Math.pow(1.8, attempt);
+      const jitter = Math.floor(Math.random() * 350);
+      return Math.min(SEARCH_RETRY_MAX_MS, Math.round(exponentialDelay + jitter));
+    }
+
+    function retryAfterMs(response) {
+      const header = response.headers.get("Retry-After");
+      if (!header) return null;
+
+      const seconds = Number.parseFloat(header);
+      if (Number.isFinite(seconds)) {
+        return Math.max(0, Math.round(seconds * 1000));
+      }
+
+      const retryAt = Date.parse(header);
+      return Number.isFinite(retryAt) ? Math.max(0, retryAt - Date.now()) : null;
+    }
+
+    function noteAppleRateLimit(label, delayMs, status) {
+      const now = Date.now();
+      if (now - state.rateLimitNoticeAt < 12000) {
+        return;
+      }
+
+      state.rateLimitNoticeAt = now;
+      const reason = status === 429 ? "Apple 搜索限流" : "Apple 搜索暂时不可用";
+      addLog(elements.importLog, reason + "，等待 " + formatDuration(Math.ceil(delayMs / 1000)) + " 后继续");
+      setImportProgress(
+        Number.parseInt(elements.importPercent.textContent, 10) || 0,
+        reason + "，自动重试中"
+      );
+      console.warn(label + " retry after " + delayMs + "ms");
     }
 
     function scoreCandidates(track, candidates) {
@@ -1680,7 +1905,7 @@ export function renderAppHtml() {
         headers: appleHeaders(developerToken, musicUserToken),
         body: JSON.stringify({
           attributes: {
-            name: "M2M - " + name,
+            name,
             description: "Imported from NetEase Cloud Music by M2M."
           }
         })
@@ -1844,6 +2069,15 @@ export function renderAppHtml() {
       }
     }
 
+    async function waitWithImportControl(milliseconds) {
+      const deadline = Date.now() + milliseconds;
+      while (Date.now() < deadline) {
+        await waitForImportTurn();
+        await wait(Math.min(250, Math.max(0, deadline - Date.now())));
+      }
+      await waitForImportTurn();
+    }
+
     function createImportCanceledError() {
       const error = new Error("导入已停止");
       error.name = "ImportCanceledError";
@@ -1903,6 +2137,9 @@ export function renderAppHtml() {
 
     function readableError(error) {
       if (!error) return "未知错误";
+      if (getErrorStatus(error) === 429) {
+        return "Apple 搜索限流，重试后仍未恢复";
+      }
       return error.message || String(error);
     }
 
