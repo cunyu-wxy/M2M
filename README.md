@@ -7,6 +7,7 @@ M2M is a Cloudflare Worker app for reading a NetEase Cloud Music playlist URL an
 The homepage implements this flow:
 
 - Input a NetEase Cloud Music playlist URL.
+- Join the Worker-side parsing queue before server work starts.
 - Show realtime parsing progress from the Worker with Server-Sent Events.
 - Display the parsed track table when parsing finishes.
 - Connect Apple Music with MusicKit JS.
@@ -65,12 +66,19 @@ Body:
 }
 ```
 
-### `GET /netease/playlist/stream`
+### `POST /netease/playlist/stream`
 
-Streams parser progress with Server-Sent Events.
+Streams parser progress with Server-Sent Events. The browser UI uses POST so the playlist URL and queue ticket are not placed in the request URL.
 
 ```sh
-curl -N "https://YOUR_WORKER.workers.dev/netease/playlist/stream?url=https%3A%2F%2F163cn.tv%2F8kPnBRH&limit=10"
+curl -N -X POST "https://YOUR_WORKER.workers.dev/netease/playlist/stream" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "url": "https://163cn.tv/8kPnBRH",
+    "limit": 10,
+    "clientId": "queue-client-id",
+    "ticketId": "queue-ticket-id"
+  }'
 ```
 
 Events:
@@ -78,6 +86,8 @@ Events:
 - `progress`: resolve, playlist, and song-detail batch progress.
 - `done`: final playlist payload.
 - `app-error`: normalized error payload.
+
+`GET /netease/playlist/stream` is still accepted for compatibility, but it should not be used by the browser UI because URLs can be captured in request logs.
 
 ### `GET /apple/developer-token`
 
@@ -139,17 +149,17 @@ Generate that token locally:
 ```sh
 npm run --silent apple:token -- \
   --team-id YOUR_APPLE_TEAM_ID \
-  --private-key ~/share/AuthKey_95R65A42C9.p8
+  --private-key ~/share/AuthKey_<KEY_ID>.p8
 ```
 
-The script infers `APPLE_KEY_ID` as `95R65A42C9` from the file name. The `.p8` private key stays outside the repository.
+The script infers `APPLE_KEY_ID` from an `AuthKey_<KEY_ID>.p8` file name. The `.p8` private key stays outside the repository.
 
 To inspect the expiry without printing only the raw token:
 
 ```sh
 npm run --silent apple:token -- \
   --team-id YOUR_APPLE_TEAM_ID \
-  --private-key ~/share/AuthKey_95R65A42C9.p8 \
+  --private-key ~/share/AuthKey_<KEY_ID>.p8 \
   --json
 ```
 

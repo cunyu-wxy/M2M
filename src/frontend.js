@@ -1107,7 +1107,7 @@ export function renderAppHtml() {
       }
     }
 
-    function beginPlaylistStream(url) {
+    async function beginPlaylistStream(url) {
       elements.appStatus.textContent = "解析中";
       elements.appStatus.className = "badge warn";
       setParseProgress(4, "提交解析任务");
@@ -1115,53 +1115,114 @@ export function renderAppHtml() {
       addLog(elements.parseLog, "已获得解析名额，开始读取网易云歌单");
       showView("parse");
 
-      const streamUrl = "/netease/playlist/stream?url=" +
-        encodeURIComponent(url) +
-        "&ticketId=" +
-        encodeURIComponent(state.queue.ticketId) +
-        "&clientId=" +
-        encodeURIComponent(state.clientId);
-      const eventSource = new EventSource(streamUrl);
+      let completed = false;
+      try {
+        const response = await fetch("/netease/playlist/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url,
+            ticketId: state.queue.ticketId,
+            clientId: state.clientId
+          })
+        });
 
-      eventSource.addEventListener("progress", (event) => {
-        handleParseProgress(JSON.parse(event.data));
-      });
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null);
+          throw new Error(payload && payload.error ? payload.error.message : "解析请求失败。");
+        }
 
-      eventSource.addEventListener("done", (event) => {
-        eventSource.close();
-        const result = JSON.parse(event.data);
-        state.parsed = result;
-        renderTracks(result.tracks);
-        populatePlaylistName(result.playlist && result.playlist.name);
-        elements.playlistNamePanel.hidden = false;
-        elements.afterParseActions.hidden = false;
-        elements.trackTableWrap.hidden = false;
-        updateAppleButton();
-        elements.metricMissing.textContent = String(result.missingCount);
-        elements.metricParsed.textContent = String(result.extractedCount);
-        setParseProgress(100, "解析完成");
-        elements.appStatus.textContent = "解析完成";
-        elements.appStatus.className = "badge ok";
-        addLog(elements.parseLog, "解析完成，共 " + result.extractedCount + " 首");
-        releaseQueue("parse_complete");
-      });
+        await readEventStream(response, {
+          progress: (event) => handleParseProgress(event),
+          done: (result) => {
+            completed = true;
+            state.parsed = result;
+            renderTracks(result.tracks);
+            populatePlaylistName(result.playlist && result.playlist.name);
+            elements.playlistNamePanel.hidden = false;
+            elements.afterParseActions.hidden = false;
+            elements.trackTableWrap.hidden = false;
+            updateAppleButton();
+            elements.metricMissing.textContent = String(result.missingCount);
+            elements.metricParsed.textContent = String(result.extractedCount);
+            setParseProgress(100, "解析完成");
+            elements.appStatus.textContent = "解析完成";
+            elements.appStatus.className = "badge ok";
+            addLog(elements.parseLog, "解析完成，共 " + result.extractedCount + " 首");
+            releaseQueue("parse_complete");
+          },
+          "app-error": (error) => {
+            throw new Error(error && error.message ? error.message : "解析连接中断，请稍后重试。");
+          }
+        });
 
-      eventSource.addEventListener("app-error", (event) => {
-        eventSource.close();
-        const message = event.data ? JSON.parse(event.data).message : "解析连接中断，请稍后重试。";
-        elements.appStatus.textContent = "解析失败";
-        elements.appStatus.className = "badge fail";
-        releaseQueue("parse_error");
-        showError("解析失败", message);
-      });
-
-      eventSource.onerror = () => {
-        eventSource.close();
+        if (!completed) {
+          throw new Error("解析连接提前结束，请稍后重试。");
+        }
+      } catch (error) {
         elements.appStatus.textContent = "解析失败";
         elements.appStatus.className = "badge fail";
         releaseQueue("parse_disconnect");
-        showError("解析失败", "解析连接中断，请稍后重试。");
-      };
+        showError("解析失败", error.message || "解析连接中断，请稍后重试。");
+      }
+    }
+
+    async function readEventStream(response, handlers) {
+      if (!response.body || !response.body.getReader) {
+        throw new Error("当前浏览器不支持流式解析，请更新浏览器后重试。");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) {
+          break;
+        }
+
+        buffer += decoder.decode(chunk.value, { stream: true });
+        buffer = dispatchBufferedEvents(buffer, handlers);
+      }
+
+      buffer += decoder.decode();
+      if (buffer.trim()) {
+        dispatchEventBlock(buffer, handlers);
+      }
+    }
+
+    function dispatchBufferedEvents(buffer, handlers) {
+      let remaining = buffer;
+      let delimiterIndex = remaining.search(/\\r?\\n\\r?\\n/);
+
+      while (delimiterIndex >= 0) {
+        const block = remaining.slice(0, delimiterIndex);
+        remaining = remaining.slice(remaining[delimiterIndex] === "\\r" ? delimiterIndex + 4 : delimiterIndex + 2);
+        dispatchEventBlock(block, handlers);
+        delimiterIndex = remaining.search(/\\r?\\n\\r?\\n/);
+      }
+
+      return remaining;
+    }
+
+    function dispatchEventBlock(block, handlers) {
+      let eventName = "message";
+      const dataLines = [];
+
+      for (const line of block.split(/\\r?\\n/)) {
+        if (line.startsWith("event:")) {
+          eventName = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          dataLines.push(line.slice(5).trimStart());
+        }
+      }
+
+      if (!dataLines.length || !handlers[eventName]) {
+        return;
+      }
+
+      handlers[eventName](JSON.parse(dataLines.join("\\n")));
     }
 
     async function joinQueue() {
@@ -2157,13 +2218,13 @@ export function renderAppHtml() {
     function getClientId() {
       const storageKey = "m2m-client-id";
       try {
-        const existingId = window.localStorage.getItem(storageKey);
+        const existingId = window.sessionStorage.getItem(storageKey);
         if (existingId) {
           return existingId;
         }
 
         const createdId = createClientId();
-        window.localStorage.setItem(storageKey, createdId);
+        window.sessionStorage.setItem(storageKey, createdId);
         return createdId;
       } catch {
         return createClientId();

@@ -3,24 +3,33 @@ import { renderAppHtml } from "./frontend.js";
 import { NeteaseError, extractNeteasePlaylist } from "./netease.js";
 export { QueueCoordinator } from "./queue.js";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+const corsBaseHeaders = {
   "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400"
+  "Access-Control-Max-Age": "86400",
+  Vary: "Origin"
+};
+
+const securityHeaders = {
+  "Referrer-Policy": "no-referrer",
+  "X-Content-Type-Options": "nosniff"
 };
 
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: corsHeaders });
+      const preflightHeaders = corsHeadersFor(request, env);
+      return new Response(null, {
+        status: preflightHeaders ? 204 : 403,
+        headers: preflightHeaders || securityHeaders
+      });
     }
 
     try {
       const requestUrl = new URL(request.url);
 
       if (requestUrl.pathname === "/" && request.method === "GET") {
-        return htmlResponse(renderAppHtml());
+        return htmlResponse(renderAppHtml(), 200, request, env);
       }
 
       if (requestUrl.pathname === "/health") {
@@ -37,11 +46,11 @@ export default {
           ],
           appleConfigured: hasAppleCredentials(env),
           queueConfigured: hasQueueBinding(env)
-        });
+        }, 200, request, env);
       }
 
       if (requestUrl.pathname.startsWith("/queue/")) {
-        return await handleQueue(request, env, requestUrl);
+        return withResponseHeaders(await handleQueue(request, env, requestUrl), request, env);
       }
 
       if (requestUrl.pathname === "/netease/playlist") {
@@ -58,10 +67,12 @@ export default {
 
       return jsonResponse(
         { error: { code: "not_found", message: "Route not found." } },
-        404
+        404,
+        request,
+        env
       );
     } catch (error) {
-      return errorResponse(error);
+      return errorResponse(error, request, env);
     }
   }
 };
@@ -70,7 +81,9 @@ async function handleNeteasePlaylist(request, env, requestUrl) {
   if (request.method !== "GET" && request.method !== "POST") {
     return jsonResponse(
       { error: { code: "method_not_allowed", message: "Use GET or POST." } },
-      405
+      405,
+      request,
+      env
     );
   }
 
@@ -81,7 +94,9 @@ async function handleNeteasePlaylist(request, env, requestUrl) {
   if (!sourceUrl) {
     return jsonResponse(
       { error: { code: "missing_url", message: "Missing NetEase playlist URL." } },
-      400
+      400,
+      request,
+      env
     );
   }
 
@@ -98,22 +113,25 @@ async function handleNeteasePlaylist(request, env, requestUrl) {
     batchSize: parseOptionalInteger(env.NETEASE_BATCH_SIZE) || 200
   });
 
-  return jsonResponse(result);
+  return jsonResponse(result, 200, request, env);
 }
 
 async function handleNeteasePlaylistStream(request, env, requestUrl) {
-  if (request.method !== "GET") {
+  if (request.method !== "GET" && request.method !== "POST") {
     return jsonResponse(
-      { error: { code: "method_not_allowed", message: "Use GET." } },
-      405
+      { error: { code: "method_not_allowed", message: "Use GET or POST." } },
+      405,
+      request,
+      env
     );
   }
 
-  const sourceUrl = requestUrl.searchParams.get("url");
-  const limit = parseOptionalInteger(requestUrl.searchParams.get("limit"));
+  const payload = request.method === "POST" ? await readJsonBody(request) : {};
+  const sourceUrl = payload.url || requestUrl.searchParams.get("url");
+  const limit = parseOptionalInteger(payload.limit || requestUrl.searchParams.get("limit"));
   await requireActiveQueueSlot(env, {
-    ticketId: requestUrl.searchParams.get("ticketId"),
-    clientId: requestUrl.searchParams.get("clientId"),
+    ticketId: payload.ticketId || requestUrl.searchParams.get("ticketId"),
+    clientId: payload.clientId || requestUrl.searchParams.get("clientId"),
     progress: 2,
     statusText: "准备解析歌单"
   });
@@ -150,7 +168,8 @@ async function handleNeteasePlaylistStream(request, env, requestUrl) {
 
   return new Response(stream, {
     headers: {
-      ...corsHeaders,
+      ...securityHeaders,
+      ...(corsHeadersFor(request, env) || {}),
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache"
     }
@@ -171,7 +190,7 @@ async function handleQueue(request, env, requestUrl) {
       averageSeconds: 0,
       frontProgress: 100,
       activeProgress: []
-    });
+    }, 200, request, env);
   }
 
   const queuePath = requestUrl.pathname.replace(/^\/queue/, "") || "/status";
@@ -232,12 +251,14 @@ async function handleAppleDeveloperToken(request, env) {
   if (request.method !== "GET") {
     return jsonResponse(
       { error: { code: "method_not_allowed", message: "Use GET." } },
-      405
+      405,
+      request,
+      env
     );
   }
 
   const token = await createAppleDeveloperToken(env);
-  return jsonResponse(token);
+  return jsonResponse(token, 200, request, env);
 }
 
 async function readJsonBody(request) {
@@ -262,26 +283,30 @@ function parseOptionalInteger(value) {
   return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : null;
 }
 
-function htmlResponse(body, status = 200) {
+function htmlResponse(body, status = 200, request = null, env = null) {
   return new Response(body, {
     status,
     headers: {
+      ...securityHeaders,
+      ...(corsHeadersFor(request, env) || {}),
       "Content-Type": "text/html; charset=utf-8"
     }
   });
 }
 
-function jsonResponse(body, status = 200) {
+function jsonResponse(body, status = 200, request = null, env = null) {
   return new Response(JSON.stringify(body, null, 2), {
     status,
     headers: {
-      ...corsHeaders,
+      ...securityHeaders,
+      ...(corsHeadersFor(request, env) || {}),
+      "Cache-Control": "no-store",
       "Content-Type": "application/json; charset=utf-8"
     }
   });
 }
 
-function errorResponse(error) {
+function errorResponse(error, request = null, env = null) {
   if (error instanceof NeteaseError || error instanceof AppleError) {
     return jsonResponse(
       {
@@ -291,7 +316,9 @@ function errorResponse(error) {
           details: error.details || undefined
         }
       },
-      error.status
+      error.status,
+      request,
+      env
     );
   }
 
@@ -302,8 +329,51 @@ function errorResponse(error) {
         message: error && error.message ? error.message : "Internal error."
       }
     },
-    500
+    500,
+    request,
+    env
   );
+}
+
+function withResponseHeaders(response, request, env) {
+  const headers = new Headers(response.headers);
+  for (const [key, value] of Object.entries(securityHeaders)) {
+    headers.set(key, value);
+  }
+  const corsHeaders = corsHeadersFor(request, env);
+  if (corsHeaders) {
+    for (const [key, value] of Object.entries(corsHeaders)) {
+      headers.set(key, value);
+    }
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
+}
+
+function corsHeadersFor(request, env) {
+  if (!request) {
+    return null;
+  }
+
+  const origin = request.headers.get("origin");
+  if (!origin) {
+    return null;
+  }
+
+  const requestOrigin = new URL(request.url).origin;
+  const configuredOrigin = env && typeof env.PUBLIC_ORIGIN === "string" ? env.PUBLIC_ORIGIN.trim() : "";
+  const allowedOrigin = configuredOrigin || requestOrigin;
+  if (origin !== requestOrigin && origin !== allowedOrigin) {
+    return null;
+  }
+
+  return {
+    ...corsBaseHeaders,
+    "Access-Control-Allow-Origin": origin
+  };
 }
 
 function serializeError(error) {
