@@ -7,6 +7,8 @@ M2M is a Cloudflare Workers app for migrating public playlists from Chinese musi
 
 Live demo: https://m2m.xinyu017722.workers.dev/
 
+Community link: [LINUX DO](https://linux.do/)
+
 Languages: [English](#english) | [简体中文](#简体中文)
 
 ## English
@@ -317,6 +319,8 @@ M2M is released under the [MIT License](LICENSE).
 M2M 是一个部署在 Cloudflare Workers 上的在线歌单迁移工具，用来把中文音乐平台的公开歌单解析出来，并迁移到用户自己的 Apple Music 资料库。
 
 在线体验：https://m2m.xinyu017722.workers.dev/
+
+社区友链：[LINUX DO](https://linux.do/)
 
 这个项目按公共服务设计：
 
