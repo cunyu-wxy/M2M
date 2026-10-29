@@ -2,6 +2,21 @@
 
 All notable changes to this project are recorded here.
 
+## 2026-10-29
+
+### Security
+
+- Issue browser MusicKit developer tokens separately from backend catalog tokens, with an exact origin claim and a default 30-minute lifetime (maximum one hour).
+- Replace anonymous GET issuance with an origin-checked JSON POST. Add persistent, transactional per-IP and global issuance limits through the existing Durable Object, with Retry-After and expiring hashed counters.
+- Refresh browser tokens before authorization and library writes, including long imports and manual review pauses. Concurrent refreshes share one request; refresh failures stop writes without marking every song as failed.
+- Stop forwarding pre-signed server tokens to browsers. Browser authorization now requires the three Apple signing secrets. Already-issued tokens retain their original expiration; deployment does not revoke Apple keys.
+
+### 更新摘要
+
+- 浏览器 token 绑定站点、默认 30 分钟有效，并与服务端曲库 token 分开；签发接口改为同源 POST，加入每 IP 和全站持久化限流。
+- 长时间导入和人工确认后自动更新即将过期的凭据，刷新失败不会造成批量歌曲误判。
+- 仅配置长期预签名 token 的部署需补齐三个 Apple 签名配置；旧 token 不会因部署立即失效。
+
 ## 2026-10-13
 
 ### 更新摘要

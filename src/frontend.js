@@ -1036,6 +1036,8 @@ SOFTWARE.</desc>
       playlistUrl: "",
       parsed: null,
       developerToken: null,
+      developerTokenExpiresAt: 0,
+      developerTokenPromise: null,
       musicUserToken: null,
       importRows: [],
       catalogCache: new Map(),
@@ -1598,17 +1600,7 @@ SOFTWARE.</desc>
         startImportControl();
         addLog(elements.importLog, "请求 Apple Music Developer Token");
 
-        const tokenResponse = await fetch("/apple/developer-token");
-        const tokenPayload = await tokenResponse.json();
-        if (!tokenResponse.ok) {
-          throw new Error(
-            tokenPayload.error
-              ? tokenPayload.error.message + " 用户 Apple ID 仍会在浏览器中单独授权。"
-              : "站点尚未配置 Apple Music app 凭据。用户 Apple ID 仍会在浏览器中单独授权。"
-          );
-        }
-
-        state.developerToken = tokenPayload.developerToken;
+        await ensureAppleDeveloperToken();
         configureMusicKit(state.developerToken);
         addLog(elements.importLog, "打开 Apple Music 授权");
         const music = MusicKit.getInstance();
@@ -1646,6 +1638,42 @@ SOFTWARE.</desc>
           build: "0.1.0"
         }
       });
+    }
+
+    async function ensureAppleDeveloperToken() {
+      if (state.developerToken && state.developerTokenExpiresAt * 1000 - Date.now() > 120000) {
+        return state.developerToken;
+      }
+      if (!state.developerTokenPromise) {
+        state.developerTokenPromise = (async () => {
+          try {
+            const response = await fetch("/apple/developer-token", {
+              method: "POST", credentials: "same-origin", cache: "no-store",
+              headers: { "Content-Type": "application/json" }, body: "{}",
+              signal: AbortSignal.timeout(20000)
+            });
+            const payload = await response.json();
+            if (!response.ok) {
+              const retrySeconds = Number(response.headers.get("Retry-After"));
+              throw new Error(response.status === 429
+                ? "Apple 授权凭据请求过于频繁，请在 " + (retrySeconds || 60) + " 秒后重试。"
+                : "无法更新 Apple 授权凭据：" + (payload.error?.message || response.status));
+            }
+            const remaining = payload.expiresAt * 1000 - Date.now();
+            if (typeof payload.developerToken !== "string" || !payload.developerToken ||
+                !Number.isFinite(payload.expiresAt) || remaining <= 120000 || remaining > 3630000) {
+              throw new Error("Apple 授权凭据有效期异常，请检查站点配置。");
+            }
+            state.developerToken = payload.developerToken;
+            state.developerTokenExpiresAt = payload.expiresAt;
+            return state.developerToken;
+          } catch (error) {
+            error.name = "AppleTokenError";
+            throw error;
+          }
+        })().finally(() => { state.developerTokenPromise = null; });
+      }
+      return state.developerTokenPromise;
     }
 
     async function authorizeAppleMusic(music) {
@@ -1829,7 +1857,6 @@ SOFTWARE.</desc>
       await waitForImportTurn();
       const playlistId = await createApplePlaylist(
         playlistName,
-        state.developerToken,
         state.musicUserToken,
         parsed.source && parsed.source.name
       );
@@ -1840,7 +1867,6 @@ SOFTWARE.</desc>
       const importResult = await addTracksToApplePlaylist(
         playlistId,
         matchedRows,
-        state.developerToken,
         state.musicUserToken,
         (progress) => {
           elements.importSucceeded.textContent = String(progress.succeeded);
@@ -2449,10 +2475,10 @@ SOFTWARE.</desc>
       console.warn(label + " retry after " + delayMs + "ms");
     }
 
-    async function createApplePlaylist(name, developerToken, musicUserToken, sourceName) {
+    async function createApplePlaylist(name, musicUserToken, sourceName) {
       const response = await fetch("https://api.music.apple.com/v1/me/library/playlists", {
         method: "POST",
-        headers: appleHeaders(developerToken, musicUserToken),
+        headers: await appleHeaders(musicUserToken),
         body: JSON.stringify({
           attributes: {
             name,
@@ -2473,7 +2499,7 @@ SOFTWARE.</desc>
       return playlistId;
     }
 
-    async function addTracksToApplePlaylist(playlistId, rows, developerToken, musicUserToken, onProgress) {
+    async function addTracksToApplePlaylist(playlistId, rows, musicUserToken, onProgress) {
       let processed = 0;
       let succeeded = 0;
       let failed = 0;
@@ -2483,18 +2509,20 @@ SOFTWARE.</desc>
         await waitForImportTurn();
         const chunk = rows.slice(index, index + chunkSize);
         try {
-          await addAppleTrackChunk(playlistId, chunk, developerToken, musicUserToken);
+          await addAppleTrackChunk(playlistId, chunk, musicUserToken);
           processed += chunk.length;
           succeeded += chunk.length;
           for (const row of chunk) setTrackStatus(row.source.id, "已载入", "ok");
-        } catch {
+        } catch (error) {
+          if (error.name === "AppleTokenError") throw error;
           for (const row of chunk) {
             await waitForImportTurn();
             try {
-              await addAppleTrackChunk(playlistId, [row], developerToken, musicUserToken);
+              await addAppleTrackChunk(playlistId, [row], musicUserToken);
               succeeded += 1;
               setTrackStatus(row.source.id, "已载入", "ok");
-            } catch {
+            } catch (error) {
+              if (error.name === "AppleTokenError") throw error;
               failed += 1;
               setTrackStatus(row.source.id, "载入失败", "fail");
               recordFailedTrack(row.source, "载入 Apple 歌单失败");
@@ -2511,10 +2539,10 @@ SOFTWARE.</desc>
       return { processed, succeeded, failed };
     }
 
-    async function addAppleTrackChunk(playlistId, rows, developerToken, musicUserToken) {
+    async function addAppleTrackChunk(playlistId, rows, musicUserToken) {
       const response = await fetch("https://api.music.apple.com/v1/me/library/playlists/" + encodeURIComponent(playlistId) + "/tracks", {
         method: "POST",
-        headers: appleHeaders(developerToken, musicUserToken),
+        headers: await appleHeaders(musicUserToken),
         body: JSON.stringify({
           data: rows.map((row) => ({ id: row.apple.id, type: "songs" }))
         })
@@ -2525,7 +2553,8 @@ SOFTWARE.</desc>
       }
     }
 
-    function appleHeaders(developerToken, musicUserToken) {
+    async function appleHeaders(musicUserToken) {
+      const developerToken = await ensureAppleDeveloperToken();
       return {
         "Authorization": "Bearer " + developerToken,
         "Music-User-Token": musicUserToken,

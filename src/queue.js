@@ -1,6 +1,7 @@
 import { AppleError } from "./apple.js";
 import { AppleCatalogService } from "./apple-catalog.js";
 import { SqliteCatalogCache } from "./catalog-cache.js";
+import { consumeTokenAllowance, clearExpiredTokenAllowances } from "./apple-token-limit.js";
 
 const QUEUE_STORAGE_KEY = "m2m-queue-state-v1";
 const DEFAULT_MAX_ACTIVE = 2;
@@ -19,6 +20,10 @@ export class QueueCoordinator {
 
   async fetch(request) {
     const requestUrl = new URL(request.url);
+    if (requestUrl.pathname === "/apple/token-limit" && request.method === "POST") {
+      const { clientHash } = await request.json();
+      return jsonResponse(await consumeTokenAllowance(this.state.storage, clientHash));
+    }
     if (requestUrl.pathname === "/apple/catalog" && request.method === "POST") {
       try {
         return jsonResponse(await this.appleCatalog.request(await request.json(), { diagnostics: true }));
@@ -53,6 +58,10 @@ export class QueueCoordinator {
 
     await saveQueueState(this.state.storage, queueState);
     return jsonResponse(result);
+  }
+
+  async alarm() {
+    await clearExpiredTokenAllowances(this.state.storage);
   }
 }
 

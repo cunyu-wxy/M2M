@@ -1,4 +1,4 @@
-import { AppleError, createAppleDeveloperToken, hasAppleCredentials } from "./apple.js";
+import { AppleError, createAppleWebDeveloperToken, hasAppleCredentials } from "./apple.js";
 import { AppleCatalogService, normalizeCatalogRequest } from "./apple-catalog.js";
 import { renderAppHtml } from "./frontend.js";
 import { PlaylistError, SUPPORTED_SOURCES, extractPlaylist, isPlaylistError } from "./playlist.js";
@@ -269,17 +269,57 @@ function hasQueueBinding(env) {
 }
 
 async function handleAppleDeveloperToken(request, env) {
-  if (request.method !== "GET") {
+  if (request.method !== "POST") {
     return jsonResponse(
-      { error: { code: "method_not_allowed", message: "Use GET." } },
+      { error: { code: "method_not_allowed", message: "Use POST." } },
       405,
       request,
       env
     );
   }
 
-  const token = await createAppleDeveloperToken(env);
-  return jsonResponse(token, 200, request, env);
+  const requestOrigin = new URL(request.url).origin;
+  const origin = env.PUBLIC_ORIGIN?.trim() || requestOrigin;
+  let configured;
+  try { configured = new URL(origin); } catch { configured = null; }
+  if (!configured || configured.origin !== origin || configured.username || configured.password ||
+      (configured.protocol !== "https:" && !(configured.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(configured.hostname)))) {
+    throw new AppleError(503, "invalid_public_origin", "Configure PUBLIC_ORIGIN as the exact HTTPS site origin.");
+  }
+  if (request.headers.get("Origin") !== origin || request.headers.get("Sec-Fetch-Site") === "cross-site") {
+    throw new AppleError(403, "token_origin_denied", "Request a browser token from this site's own origin.");
+  }
+  if (request.headers.get("Content-Type")?.split(";")[0].trim().toLowerCase() !== "application/json") {
+    throw new AppleError(415, "invalid_content_type", "Use application/json.");
+  }
+  if (!hasQueueBinding(env)) {
+    throw new AppleError(503, "token_limiter_unavailable", "Token issuance requires the shared coordinator.");
+  }
+  const address = request.headers.get("CF-Connecting-IP") || "unknown";
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(origin + "|" + address));
+  const clientHash = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+  let allowance;
+  try {
+    const response = await queueObject(env).fetch(new Request("https://m2m-queue.local/apple/token-limit", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientHash })
+    }));
+    if (!response.ok) throw new Error("Coordinator unavailable");
+    allowance = await response.json();
+    if (typeof allowance.allowed !== "boolean") throw new Error("Invalid coordinator response");
+  } catch {
+    throw new AppleError(503, "token_limiter_unavailable", "Token issuance is temporarily unavailable.");
+  }
+  if (!allowance.allowed) {
+    const response = jsonResponse({ error: { code: "token_rate_limited", message: "Too many token requests. Please try again later." } }, 429, request, env);
+    response.headers.set("Retry-After", String(Math.max(1, Math.ceil(allowance.retryAfterMs / 1000))));
+    return response;
+  }
+  try {
+    return jsonResponse(await createAppleWebDeveloperToken(env, origin), 200, request, env);
+  } catch (error) {
+    if (error instanceof AppleError) throw error;
+    throw new AppleError(503, "apple_token_signing_failed", "Apple browser token signing is unavailable. Check the site signing configuration.");
+  }
 }
 
 async function handleAppleCatalog(request, env) {

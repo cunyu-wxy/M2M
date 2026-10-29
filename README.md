@@ -116,10 +116,18 @@ Supported Worker configurations:
 | `APPLE_TEAM_ID` | For automatic signing | Apple Developer Team ID |
 | `APPLE_KEY_ID` | For automatic signing | Apple Music API key ID |
 | `APPLE_PRIVATE_KEY` | For automatic signing | Apple Music API `.p8` private key content |
-| `APPLE_DEVELOPER_TOKEN` | Optional alternative | Pre-signed Developer Token |
-| `APPLE_TOKEN_TTL_SECONDS` | Optional | Token TTL, defaults to `43200` |
+| `APPLE_DEVELOPER_TOKEN` | Optional, server only | Pre-signed token for backend catalog queries; never returned to browsers |
+| `APPLE_TOKEN_TTL_SECONDS` | Optional | Server token TTL, defaults to `43200` |
+| `APPLE_WEB_TOKEN_TTL_SECONDS` | Optional | Browser token TTL, defaults to `1800`, constrained to 300-3600 seconds |
+| `PUBLIC_ORIGIN` | Optional | Exact browser origin, e.g. `https://music.example.com`, without a trailing slash; defaults to the Worker request origin |
 
-Use either automatic signing or a pre-signed developer token. Do not commit `.p8`, `.dev.vars`, or any real token to Git.
+Browser authorization requires all three signing secrets (`APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY`). A deployment with only `APPLE_DEVELOPER_TOKEN` can still query the catalog, but must add the signing secrets to enable browser authorization. Do not commit `.p8`, `.dev.vars`, or any real token to Git.
+
+Browser developer tokens are deliberately visible to MusicKit JS, but are signed separately with an exact `origin` claim and a default 30-minute lifetime. The browser renews them when fewer than two minutes remain, before authorization or each library write, including after long matching/review pauses. Server catalog tokens remain separate. Tokens and subscriber credentials are never included in diagnostics or limiter storage.
+
+Token issuance requires a same-origin JSON POST and the existing `M2M_QUEUE` Durable Object. Missing/foreign origins and cross-site browser requests are rejected. A transactional, persistent limiter allows 12 requests per client IP per 10 minutes and 120 globally per minute, returning `429` and `Retry-After`. It stores at most 500 hashed IP counters; expired counters are pruned and an alarm clears them after inactivity. Raw IP addresses are not stored. Hashed identifiers are pseudonymous, not anonymous. This is an abuse deterrent, not authentication: non-browser clients can forge Origin headers. Cloudflare-side abuse protection may still be needed for a public service.
+
+Previously issued unrestricted tokens are not invalidated by deployment; they remain valid until their original expiration. Revoking the associated MusicKit key invalidates those credentials but also interrupts clients using it. The site does not rotate or revoke developer keys automatically.
 
 ### API
 
@@ -195,9 +203,9 @@ Legacy aliases are still available:
 - `POST /netease/playlist`
 - `POST /netease/playlist/stream`
 
-#### `GET /apple/developer-token`
+#### `POST /apple/developer-token`
 
-Returns an Apple Music Developer Token for MusicKit JS.
+Returns a short-lived, origin-bound Apple Music Developer Token and `expiresAt` for MusicKit JS. Use `Content-Type: application/json`, an empty JSON body, and the site's `Origin`. The browser supplies Origin automatically. GET returns `405`; the limiter must be available. This response uses `Cache-Control: no-store`.
 
 #### `POST /apple/catalog`
 
@@ -231,7 +239,7 @@ APPLE_KEY_ID=YOUR_KEY_ID
 APPLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----"
 ```
 
-Or use a pre-signed developer token:
+For backend catalog access only, a pre-signed developer token can also be configured:
 
 ```sh
 APPLE_DEVELOPER_TOKEN=YOUR_PRE_SIGNED_DEVELOPER_TOKEN
@@ -275,7 +283,7 @@ npx wrangler secret put APPLE_KEY_ID
 npx wrangler secret put APPLE_PRIVATE_KEY
 ```
 
-Or configure a pre-signed token:
+Optionally configure a separate pre-signed token for backend catalog queries (browser authorization still requires the signing secrets above):
 
 ```sh
 npx wrangler secret put APPLE_DEVELOPER_TOKEN
@@ -466,10 +474,18 @@ Worker 支持的配置：
 | `APPLE_TEAM_ID` | 自动签发时必需 | Apple Developer Team ID |
 | `APPLE_KEY_ID` | 自动签发时必需 | Apple Music API Key ID |
 | `APPLE_PRIVATE_KEY` | 自动签发时必需 | Apple Music API `.p8` 私钥内容 |
-| `APPLE_DEVELOPER_TOKEN` | 可选替代 | 预签名 Developer Token |
-| `APPLE_TOKEN_TTL_SECONDS` | 可选 | token 有效期，默认 `43200` |
+| `APPLE_DEVELOPER_TOKEN` | 可选，仅服务端 | 后端曲库查询使用的预签名 token，不返回浏览器 |
+| `APPLE_TOKEN_TTL_SECONDS` | 可选 | 服务端 token 有效期，默认 `43200` 秒 |
+| `APPLE_WEB_TOKEN_TTL_SECONDS` | 可选 | 浏览器 token 有效期，默认 `1800` 秒，限制在 300-3600 秒 |
+| `PUBLIC_ORIGIN` | 可选 | 浏览器使用的完整站点来源，如 `https://music.example.com`，不要带末尾斜杠；默认使用 Worker 请求来源 |
 
-自动签发和预签名 token 二选一即可。不要把 `.p8`、`.dev.vars` 或真实 token 提交到 Git。
+浏览器授权需要同时配置 `APPLE_TEAM_ID`、`APPLE_KEY_ID`、`APPLE_PRIVATE_KEY`。仅配置 `APPLE_DEVELOPER_TOKEN` 的部署仍可查询公开曲库，但必须补齐签名配置才能使用浏览器授权。不要把 `.p8`、`.dev.vars` 或真实 token 提交到 Git。
+
+MusicKit JS 必须在浏览器中使用 Developer Token；现在浏览器 token 单独签发，绑定精确的 `origin`，默认 30 分钟有效。授权或每次写入资料库前，剩余有效期不足两分钟时会自动刷新，包括长时间匹配、暂停和人工确认后。后端曲库 token 与浏览器 token 分开，诊断和限流存储不包含 token 或用户凭据。
+
+签发接口要求同源 JSON POST，并复用现有 `M2M_QUEUE` Durable Object。缺失或不匹配的 Origin、跨站浏览器请求会被拒绝。持久化事务限流为每个客户端 IP 每 10 分钟 12 次、全站每分钟 120 次，超限返回 `429` 和 `Retry-After`。最多存储 500 个哈希化 IP 计数器，清理过期记录并通过定时警报清理闲置状态，不保存原始 IP；这些哈希标识属于假名化数据，并非匿名数据。这些措施用于降低滥用，不能替代身份认证，非浏览器脚本仍可伪造 Origin；公共服务仍可能需要 Cloudflare 侧的防滥用措施。
+
+部署不会撤销此前签发的无限制 token，它们会在原有效期结束后失效。撤销对应 MusicKit 密钥可使旧凭据失效，但也会中断使用它们的客户端；网站不会自动轮换或撤销开发者密钥。
 
 ### API
 
@@ -545,9 +561,9 @@ curl "https://m2m.xinyu017722.workers.dev/playlist?url=https%3A%2F%2F163cn.tv%2F
 - `POST /netease/playlist`
 - `POST /netease/playlist/stream`
 
-#### `GET /apple/developer-token`
+#### `POST /apple/developer-token`
 
-返回 MusicKit JS 使用的 Apple Music Developer Token。
+返回 MusicKit JS 使用的短期、绑定站点的 Developer Token 和 `expiresAt`。请求需使用 `Content-Type: application/json`、空 JSON 请求体和本站 `Origin`（浏览器自动附带）。GET 返回 `405`；共享限流器不可用时不会签发，响应使用 `Cache-Control: no-store`。
 
 #### `POST /apple/catalog`
 
@@ -581,7 +597,7 @@ APPLE_KEY_ID=YOUR_KEY_ID
 APPLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----"
 ```
 
-或者使用预签名 Developer Token：
+仅用于后端曲库查询时，也可以配置预签名 Developer Token：
 
 ```sh
 APPLE_DEVELOPER_TOKEN=YOUR_PRE_SIGNED_DEVELOPER_TOKEN
@@ -625,7 +641,7 @@ npx wrangler secret put APPLE_KEY_ID
 npx wrangler secret put APPLE_PRIVATE_KEY
 ```
 
-也可以配置预签名 token：
+也可以为后端曲库查询单独配置预签名 token（浏览器授权仍需上述签名配置）：
 
 ```sh
 npx wrangler secret put APPLE_DEVELOPER_TOKEN

@@ -17,6 +17,17 @@ export async function createAppleDeveloperToken(env, now = Math.floor(Date.now()
     };
   }
 
+  return signDeveloperToken(env, now, Number.parseInt(valueFromEnv(env, "APPLE_TOKEN_TTL_SECONDS") || "43200", 10));
+}
+
+export async function createAppleWebDeveloperToken(env, origin, now = Math.floor(Date.now() / 1000)) {
+  if (!origin) throw new AppleError(503, "invalid_public_origin", "A browser token requires an origin.");
+  const configured = Number(valueFromEnv(env, "APPLE_WEB_TOKEN_TTL_SECONDS") || 1800);
+  const ttl = Number.isInteger(configured) ? Math.min(3600, Math.max(300, configured)) : 1800;
+  return signDeveloperToken(env, now, ttl, origin);
+}
+
+async function signDeveloperToken(env, now, ttlSeconds, origin = null) {
   const teamId = valueFromEnv(env, "APPLE_TEAM_ID");
   const keyId = valueFromEnv(env, "APPLE_KEY_ID");
   const privateKey = valueFromEnv(env, "APPLE_PRIVATE_KEY");
@@ -27,22 +38,23 @@ export async function createAppleDeveloperToken(env, now = Math.floor(Date.now()
       "apple_credentials_missing",
       "Apple Music app credentials are not configured on this Worker.",
       {
-        acceptedConfigurations: [
-          ["APPLE_DEVELOPER_TOKEN"],
-          ["APPLE_TEAM_ID", "APPLE_KEY_ID", "APPLE_PRIVATE_KEY"]
-        ],
-        note: "These are site-level Apple Music API credentials, not end-user Apple ID credentials."
+        acceptedConfigurations: origin
+          ? [["APPLE_TEAM_ID", "APPLE_KEY_ID", "APPLE_PRIVATE_KEY"]]
+          : [["APPLE_DEVELOPER_TOKEN"], ["APPLE_TEAM_ID", "APPLE_KEY_ID", "APPLE_PRIVATE_KEY"]],
+        note: origin
+          ? "Browser authorization requires APPLE_TEAM_ID, APPLE_KEY_ID and APPLE_PRIVATE_KEY for short-lived, origin-bound tokens. APPLE_DEVELOPER_TOKEN is server-only."
+          : "These are site-level Apple Music API credentials, not end-user Apple ID credentials."
       }
     );
   }
 
-  const ttlSeconds = Number.parseInt(valueFromEnv(env, "APPLE_TOKEN_TTL_SECONDS") || "43200", 10);
   const header = { alg: "ES256", kid: keyId };
   const payload = {
     iss: teamId,
     iat: now,
     exp: now + (Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds : 43200)
   };
+  if (origin) payload.origin = [origin];
   const signingInput = `${base64UrlJson(header)}.${base64UrlJson(payload)}`;
   const key = await importApplePrivateKey(privateKey);
   const signature = await crypto.subtle.sign(
