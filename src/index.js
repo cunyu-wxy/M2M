@@ -1,4 +1,4 @@
-import { AppleError, createAppleWebDeveloperToken, hasAppleCredentials } from "./apple.js";
+import { AppleError, createAppleWebDeveloperToken, hasAppleCredentials, hasAppleSigningCredentials } from "./apple.js";
 import { AppleCatalogService, normalizeCatalogRequest } from "./apple-catalog.js";
 import { renderAppHtml } from "./frontend.js";
 import { PlaylistError, SUPPORTED_SOURCES, extractPlaylist, isPlaylistError } from "./playlist.js";
@@ -51,7 +51,8 @@ export default {
             "/apple/catalog"
           ],
           supportedSources: SUPPORTED_SOURCES,
-          appleConfigured: hasAppleCredentials(env),
+          appleConfigured: hasAppleSigningCredentials(env) && hasQueueBinding(env),
+          appleCatalogConfigured: hasAppleCredentials(env),
           queueConfigured: hasQueueBinding(env)
         }, 200, request, env);
       }

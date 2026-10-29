@@ -71,11 +71,12 @@ async function signDeveloperToken(env, now, ttlSeconds, origin = null) {
 
 export function hasAppleCredentials(env) {
   return Boolean(
-    valueFromEnv(env, "APPLE_DEVELOPER_TOKEN") ||
-      (valueFromEnv(env, "APPLE_TEAM_ID") &&
-        valueFromEnv(env, "APPLE_KEY_ID") &&
-        valueFromEnv(env, "APPLE_PRIVATE_KEY"))
+    valueFromEnv(env, "APPLE_DEVELOPER_TOKEN") || hasAppleSigningCredentials(env)
   );
+}
+
+export function hasAppleSigningCredentials(env) {
+  return Boolean(valueFromEnv(env, "APPLE_TEAM_ID") && valueFromEnv(env, "APPLE_KEY_ID") && valueFromEnv(env, "APPLE_PRIVATE_KEY"));
 }
 
 async function importApplePrivateKey(pem) {

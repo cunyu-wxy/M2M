@@ -10,6 +10,7 @@ All notable changes to this project are recorded here.
 - Replace anonymous GET issuance with an origin-checked JSON POST. Add persistent, transactional per-IP and global issuance limits through the existing Durable Object, with Retry-After and expiring hashed counters.
 - Refresh browser tokens before authorization and library writes, including long imports and manual review pauses. Concurrent refreshes share one request; refresh failures stop writes without marking every song as failed.
 - Stop forwarding pre-signed server tokens to browsers. Browser authorization now requires the three Apple signing secrets. Already-issued tokens retain their original expiration; deployment does not revoke Apple keys.
+- Report browser authorization readiness separately from backend catalog readiness, so server-only credentials do not enable an unusable authorization flow.
 
 ### 更新摘要
 

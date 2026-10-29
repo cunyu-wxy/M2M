@@ -295,7 +295,7 @@ Check the deployment:
 curl https://m2m.xinyu017722.workers.dev/health
 ```
 
-`appleConfigured` should be `true`.
+`appleConfigured` should be `true`; it checks browser signing credentials and the shared coordinator. `appleCatalogConfigured` separately reports backend catalog credential readiness.
 
 #### Cloudflare Git Integration
 
@@ -653,7 +653,7 @@ npx wrangler secret put APPLE_DEVELOPER_TOKEN
 curl https://m2m.xinyu017722.workers.dev/health
 ```
 
-`appleConfigured` 应为 `true`。
+`appleConfigured` 应为 `true`，表示浏览器签名配置和共享协调器齐全；`appleCatalogConfigured` 单独表示后端曲库凭据是否齐全。
 
 #### Cloudflare Git 集成
 

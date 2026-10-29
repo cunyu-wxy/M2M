@@ -177,3 +177,13 @@ test("signing errors never expose secret material in HTTP responses", async () =
   assert.ok(body.includes("apple_token_signing_failed"));
   assert.ok(!body.includes("private-marker"));
 });
+
+test("health distinguishes browser authorization readiness from server-only catalog credentials", async () => {
+  const request = () => new Request(origin + "/health");
+  const serverOnly = await (await worker.fetch(request(), { APPLE_DEVELOPER_TOKEN: "server-only" })).json();
+  assert.equal(serverOnly.appleConfigured, false);
+  assert.equal(serverOnly.appleCatalogConfigured, true);
+  assert.ok(!JSON.stringify(serverOnly).includes("server-only"));
+  assert.equal((await (await worker.fetch(request(), credentials)).json()).appleConfigured, false);
+  assert.equal((await (await worker.fetch(request(), environment())).json()).appleConfigured, true);
+});
