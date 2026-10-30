@@ -5,8 +5,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "npm run build:matcher && node scripts/build-version.mjs",
     "build:matcher": "node scripts/build-matcher.mjs",
-    "pretest": "npm run build:matcher",
+    "pretest": "npm run build",
+    "verify:production": "node scripts/verify-production.mjs",
     "apple:token": "node scripts/generate-apple-developer-token.mjs",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",

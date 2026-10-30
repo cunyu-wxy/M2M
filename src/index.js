@@ -2,6 +2,7 @@ import { AppleError, createAppleWebDeveloperToken, hasAppleCredentials, hasApple
 import { AppleCatalogService, normalizeCatalogRequest } from "./apple-catalog.js";
 import { renderAppHtml } from "./frontend.js";
 import { PlaylistError, SUPPORTED_SOURCES, extractPlaylist, isPlaylistError } from "./playlist.js";
+import { GIT_SHA } from "../dist/version.js";
 export { QueueCoordinator } from "./queue.js";
 
 const corsBaseHeaders = {
@@ -38,6 +39,10 @@ export default {
       if (requestUrl.pathname === "/health") {
         return jsonResponse({
           ok: true,
+          version: {
+            gitSha: GIT_SHA,
+            workerVersionId: /^[a-f0-9-]{36}$/i.test(env?.CF_VERSION_METADATA?.id || "") ? env.CF_VERSION_METADATA.id : null
+          },
           endpoints: [
             "/queue/join",
             "/queue/status",
