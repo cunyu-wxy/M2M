@@ -1,39 +1,123 @@
-name: Deploy Cloudflare Worker
+name: Test and verify Cloudflare Worker
 
 on:
   push:
     branches:
       - main
+  pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: worker-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
 jobs:
-  deploy:
+  test:
+    name: Tests
     runs-on: ubuntu-latest
-    env:
-      HAS_CLOUDFLARE_SECRETS: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
+    outputs:
+      deployment_mode: ${{ steps.owner.outputs.mode }}
     steps:
+      - name: Select deployment owner
+        id: owner
+        env:
+          DEPLOYMENT_MODE: ${{ vars.DEPLOYMENT_MODE || 'git-integration' }}
+        run: |
+          case "$DEPLOYMENT_MODE" in
+            actions|git-integration) echo "mode=$DEPLOYMENT_MODE" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::DEPLOYMENT_MODE must be actions or git-integration"; exit 1 ;;
+          esac
+
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
-
       - name: Install dependencies
-        run: npm install
-
+        run: npm ci
       - name: Run tests
         run: npm test
+      - name: Record test result
+        run: |
+          echo 'Tests passed. This job does not prove deployment or production activation.' >> "$GITHUB_STEP_SUMMARY"
 
+  deploy:
+    name: Deploy (GitHub Actions)
+    needs: test
+    if: github.ref == 'refs/heads/main' && needs.test.outputs.deployment_mode == 'actions'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Require deployment credentials
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [[ -z "$CF_TOKEN" || -z "$CF_ACCOUNT" ]]; then
+            echo '::error::Actions deployment selected but Cloudflare secrets are missing.'
+            exit 1
+          fi
       - name: Deploy
-        if: env.HAS_CLOUDFLARE_SECRETS == 'true'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
 
-      - name: Skip deploy
-        if: env.HAS_CLOUDFLARE_SECRETS != 'true'
-        run: echo "Cloudflare Git integration or missing GitHub secrets; skipping wrangler deploy."
+  verify:
+    name: Verify production SHA and security
+    needs: [test, deploy]
+    if: >-
+      ${{ always() && !cancelled() && github.ref == 'refs/heads/main' &&
+          needs.test.result == 'success' &&
+          (needs.test.outputs.deployment_mode == 'git-integration' || needs.deploy.result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      PRODUCTION_URL: ${{ vars.PRODUCTION_URL || (github.repository == 'cunyu-wxy/M2M' && 'https://m2m.xinyu017722.workers.dev') || '' }}
+      EXPECTED_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Wait for production version and verify security
+        id: check
+        run: node scripts/verify-production.mjs "$PRODUCTION_URL" "$EXPECTED_SHA" | tee production-verification.json
+      - name: Record independent release evidence
+        if: always()
+        env:
+          DEPLOYMENT_MODE: ${{ needs.test.outputs.deployment_mode }}
+          ACTIONS_DEPLOY_RESULT: ${{ needs.deploy.result }}
+          VERIFY_RESULT: ${{ steps.check.outcome }}
+        run: |
+          {
+            echo '### Production verification'
+            echo "Expected Git SHA: $EXPECTED_SHA"
+            echo "Deployment owner: $DEPLOYMENT_MODE"
+            echo "GitHub Actions deploy job: $ACTIONS_DEPLOY_RESULT"
+            echo "Production verification: $VERIFY_RESULT"
+            if [[ "$DEPLOYMENT_MODE" == 'git-integration' ]]; then
+              echo 'Cloudflare deployment result is the separate Workers Builds: m2m commit check.'
+            fi
+            if [[ "$VERIFY_RESULT" == 'success' ]]; then
+              echo '```json'
+              cat production-verification.json
+              echo '```'
+            else
+              echo '**Production version/security NOT verified.**'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

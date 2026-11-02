@@ -626,12 +626,28 @@ npm run --silent apple:token -- \
 
 仓库包含 `.github/workflows/deploy-worker.yml`。
 
+测试、发布和线上生效是三个独立结果：
+
+| 阶段 | GitHub Actions 直部署 | Cloudflare Git Integration（默认） |
+| --- | --- | --- |
+| 测试 | Actions `Tests` | Actions `Tests`；Cloudflare 构建也应运行测试 |
+| 发布 | Actions `Deploy (GitHub Actions)` | 独立的 `Workers Builds: m2m` commit check；Actions deploy job 显示 skipped |
+| 线上生效 | Actions `Verify production SHA and security` | 同一验证 job，等待 Cloudflare 独立发布后核对线上 SHA |
+
+工作流默认 `DEPLOYMENT_MODE=git-integration`，与当前仓库使用的 Cloudflare Git Integration 一致。只选一条生产发布链路，避免同一 push 被重复部署。Actions 整体 success 不替代独立的 Cloudflare 发布检查；被更新的 main 工作流取代而 cancelled 的运行也不代表验证成功。
+
+若选择 Actions 直接发布：
+
 1. 创建具有 Workers 部署权限的 Cloudflare API Token。
 2. 找到 Cloudflare Account ID。
 3. 在 GitHub 仓库 secrets 中添加：
    - `CLOUDFLARE_API_TOKEN`
    - `CLOUDFLARE_ACCOUNT_ID`
-4. 推送到 `main`，或手动运行 workflow。
+4. 在仓库 **Variables** 中设 `DEPLOYMENT_MODE=actions`，并在 Cloudflare 控制台断开自动 Git 发布。
+5. 在仓库 Variables 中设 `PRODUCTION_URL` 为实际生产站点 Origin，例如 `https://music.example.com`。原仓库默认使用 README 中的 workers.dev 地址；fork 必须自行设置。
+6. 推送到 `main`，或在 `main` 手动运行 workflow。PR 和其他分支的手动运行只测试。
+
+显式选择 `actions` 后，缺失 Cloudflare secrets 会使 deploy job 失败，不再将跳过发布计为成功。
 
 在 Cloudflare Workers 中配置 Apple Music secrets：
 
@@ -653,7 +669,32 @@ npx wrangler secret put APPLE_DEVELOPER_TOKEN
 curl https://m2m.xinyu017722.workers.dev/health
 ```
 
-`appleConfigured` 应为 `true`，表示浏览器签名配置和共享协调器齐全；`appleCatalogConfigured` 单独表示后端曲库凭据是否齐全。
+响应新增版本字段，例如：
+
+```json
+{
+  "ok": true,
+  "version": {
+    "gitSha": "9cdb4c2cd97453df8cce33d76ecb205c85f33a4c",
+    "workerVersionId": "1be07e54-15ae-4d37-be7e-ba225808cb30"
+  },
+  "appleConfigured": true,
+  "appleCatalogConfigured": true,
+  "queueConfigured": true
+}
+```
+
+上面只是字段示例，不表示旧版本已支持这些字段。`gitSha` 在 Wrangler 自定义构建中从 Cloudflare `WORKERS_CI_COMMIT_SHA`、GitHub `GITHUB_SHA` 或本地 Git HEAD 写入打包代码，不读取运行时可修改的版本变量；已知来源不一致或没有完整 SHA 时构建失败。忽略提交的 `dist/version.js` 每次重新生成，避免复用构建缓存中的旧 SHA。`workerVersionId` 来自 Cloudflare version metadata binding，可与 `Workers Builds: m2m` 中的 Version ID 对照；本地可能为 null。响应仅增加公开版本标识，保持 `Cache-Control: no-store`，不返回环境变量、私钥或 token。
+
+`appleConfigured` 为 `true` 只表示浏览器签名配置和共享协调器绑定齐全；`appleCatalogConfigured` 表示后端曲库凭据齐全。这些标志不实际调用 Apple，不保证密钥有效或上游可用。
+
+按完整 SHA 验证生产站点：
+
+```sh
+npm run verify:production -- https://m2m.xinyu017722.workers.dev "$(git rev-parse HEAD)"
+```
+
+脚本默认最多检查 30 次，间隔 10 秒，每次请求超时 10 秒。只有生产 `/health` 返回目标 SHA、配置就绪，并且 token 接口对 GET、缺失 Origin、外站 Origin、错误 Content-Type 分别返回 405/403/403/415 时才成功。旧代码、缺少版本字段、重定向、部署失败或等待超时均不能通过。脚本不申请正常 token，不打印远端响应正文，只输出 SHA、Worker Version ID、检查数和验证时间。Actions 的 job summary 保存同样的证据。单次探测不能证明所有边缘节点或渐进发布流量均已切换；本项目应使用完整的 `wrangler deploy` 发布。
 
 #### Cloudflare Git 集成
 
@@ -664,6 +705,10 @@ curl https://m2m.xinyu017722.workers.dev/health
 - Build command：`npm install && npm test`
 - Deploy command：`npx wrangler deploy`
 - Worker entry：`src/index.js`
+
+建议将 Build command 改为 `npm ci && npm test`，并使用 Node.js 22。Deploy command 仍为 `npx wrangler deploy`：`wrangler.toml` 的 `[build]` 会自动生成 SHA，无需更改控制台发布命令。在 GitHub Variables 中设置 `DEPLOYMENT_MODE=git-integration`（也可保留默认）及实际 `PRODUCTION_URL`；无需添加 Cloudflare GitHub secrets。若配置 `PUBLIC_ORIGIN`，生产验证 URL 应使用该 Origin。
+
+Git Integration 独立监听 Git push，**不会等待 Actions 的 Tests job**；Cloudflare Build command 自己执行的 `npm test` 才是这条发布链路的测试门禁。GitHub 的生产验证 job 只观察线上结果，不持有 Cloudflare 或 Apple 密钥，也不执行发布。控制台配置无法由仓库文件自动修改，请核对生产分支为 `main`、构建测试命令及发布命令。`Workers Builds: m2m` success/Version ID 是 Cloudflare 侧发布记录，最终以生产健康检查的 SHA 和安全行为为生效证据。
 
 ### Worker 限制
 
