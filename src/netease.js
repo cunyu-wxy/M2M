@@ -29,7 +29,7 @@ export async function extractNeteasePlaylist(input, options = {}) {
   });
 
   await reportProgress(options.onProgress, { stage: "playlist", status: "running" });
-  const playlistPayload = await fetchPlaylistDetail(resolvedPlaylist.id, fetcher);
+  const playlistPayload = await fetchPlaylistDetail(resolvedPlaylist.id, fetcher, options);
   const playlist = playlistPayload.playlist;
 
   if (!playlist || !Array.isArray(playlist.trackIds)) {
@@ -187,31 +187,79 @@ async function resolvePlaylistId(input, fetcher) {
   throw new NeteaseError(400, "playlist_id_not_found", "Could not find a playlist ID in the URL.");
 }
 
-async function fetchPlaylistDetail(playlistId, fetcher) {
+async function fetchPlaylistDetail(playlistId, fetcher, options) {
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      return await requestPlaylistDetail(playlistId, fetcher);
+    } catch (error) {
+      if (!(error instanceof NeteaseError) || !error.details?.retryable || attempt === 2 ||
+          error.details.retryAfterMs > 2000) throw error;
+      const retryAfterMs = Math.max(1000, error.details.retryAfterMs || 0);
+      await reportProgress(options.onProgress, {
+        stage: "playlist", status: "retrying", attempt: attempt + 1, retryAfterMs,
+        message: error.message
+      });
+      await sleep(retryAfterMs);
+    }
+  }
+}
+
+async function requestPlaylistDetail(playlistId, fetcher) {
   const apiUrl = `https://music.163.com/api/v6/playlist/detail?id=${playlistId}`;
-  const response = await fetcher(apiUrl, {
-    headers: NETEASE_HEADERS
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetcher(apiUrl, {
+      headers: NETEASE_HEADERS,
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw playlistRequestError(response.status, response, true);
+    }
+
+    let payload;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      throw new NeteaseError(502, "playlist_fetch_failed",
+        "网易云返回的歌单数据格式异常，请稍后重试。", { retryable: false, httpStatus: response.status });
+    }
+    const code = typeof payload?.code === "number" ? payload.code :
+      typeof payload?.code === "string" && /^-?\d{1,6}$/.test(payload.code) ? Number(payload.code) : null;
+    if (code !== 200) throw playlistRequestError(code, response);
+    return payload;
+  } catch (error) {
+    if (error instanceof NeteaseError) throw error;
+    const timedOut = controller.signal.aborted || error.name === "TimeoutError" || error.name === "AbortError";
+    throw new NeteaseError(502, "playlist_fetch_failed",
+      timedOut ? "读取网易云歌单超时，请稍后重试。" : "连接网易云歌单接口失败，请稍后重试。",
+      { retryable: true, reason: timedOut ? "timeout" : "network" });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function playlistRequestError(code, response, httpError = false) {
+  const retryable = [429, 500, 502, 503, 504].includes(code);
+  const label = httpError ? `HTTP ${code}` : `错误码 ${code ?? "未知"}`;
+  let message = `网易云暂时无法返回歌单（${label}），请稍后重试。`;
+  if (code === 404) {
+    message = `网易云未找到该歌单（${label}），请确认歌单仍存在且分享链接正确。`;
+  } else if ([301, 401, 403].includes(code)) {
+    message = `网易云拒绝匿名访问该歌单（${label}），请确认歌单已公开且无需登录即可访问。`;
+  } else if ([429, 460, -460].includes(code)) {
+    message = `网易云暂时限制了服务器请求（${label}），请稍后重试；这不代表歌单不存在。`;
+  }
+  const retryAfter = response.headers.get("Retry-After");
+  const retryAfterMs = retryAfter === null ? 0 : /^\d+(\.\d+)?$/.test(retryAfter.trim()) ?
+    Number(retryAfter) * 1000 : Math.max(0, Date.parse(retryAfter) - Date.now()) || 0;
+  return new NeteaseError(502, "playlist_fetch_failed", message, {
+    code, httpStatus: response.status, retryable,
+    ...(retryAfterMs > 0 ? { retryAfterMs } : {})
   });
-
-  if (!response.ok) {
-    throw new NeteaseError(
-      502,
-      "playlist_fetch_failed",
-      `NetEase playlist request failed with HTTP ${response.status}.`
-    );
-  }
-
-  const payload = await response.json();
-  if (payload.code !== 200) {
-    throw new NeteaseError(
-      502,
-      "playlist_fetch_failed",
-      "NetEase playlist request returned an error.",
-      { code: payload.code, message: payload.msg || payload.message || null }
-    );
-  }
-
-  return payload;
 }
 
 async function fetchSongDetails(trackIds, fetcher, options) {

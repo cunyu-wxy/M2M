@@ -345,6 +345,7 @@ Raise these limits only after validating queue behavior, upstream rate limits, a
 - Requests cannot bypass Apple's developer-token quota. Cold searches and cross-language fallbacks take longer than cache hits; throughput is not guaranteed.
 - Native-language catalog lookups never authorize importing songs unavailable in the subscriber's region. ISRC availability and source metadata quality still limit matches.
 - Upstream music platform page structures may change.
+- NetEase playlist-detail requests time out after 12 seconds and retry transient failures at most once. Access denials are not retried; a `Retry-After` longer than 2 seconds is returned without an automatic retry. Errors and retry progress appear in the UI; this does not bypass private-playlist access controls or upstream restrictions.
 - Some Kugou share pages expose preview tracks only.
 
 ### Roadmap
@@ -748,6 +749,7 @@ Git Integration 独立监听 Git push，**不会等待 Actions 的 Tests job**�
 - 无法绕过 Apple 按开发者令牌计算的额度；首次搜索及外文兜底比缓存命中慢，不保证固定每秒匹配数量。
 - 原语言地区只辅助识别，最终仍需确认录音在用户地区可用；ISRC 覆盖和源歌曲元数据质量仍会限制匹配效果。
 - 上游音乐平台页面结构可能变化。
+- 网易云歌单详情请求设有 12 秒超时，临时失败最多自动重试一次；权限拒绝不重试，`Retry-After` 超过 2 秒时直接提示失败，不提前重试。页面会显示错误原因和重试进度，但无法绕过私密歌单权限或上游访问限制。
 - 部分酷狗分享页只暴露预览曲目。
 
 ### 路线图

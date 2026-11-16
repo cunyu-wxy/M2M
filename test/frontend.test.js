@@ -21,6 +21,22 @@ test("honors long Retry-After values instead of retrying before the server allow
   assert.equal(context.appleSearchRetryDelay({ retryAfterMs: 60000 }, 0), 60000);
 });
 
+test("playlist retries show the upstream reason and bounded retry progress", () => {
+  const { script } = functions();
+  const logs = [];
+  const progress = [];
+  const context = vm.createContext({ Math, state: {}, elements: { parseLog: {} },
+    setParseProgress: (percent, message) => progress.push({ percent, message }),
+    addLog: (_element, message) => logs.push(message), heartbeatQueue: () => {} });
+  vm.runInContext(script.slice(script.indexOf("    function handleParseProgress("),
+    script.indexOf("    function setParseProgress(")), context);
+  context.handleParseProgress({ stage: "playlist", status: "retrying", attempt: 2,
+    retryAfterMs: 1000, message: "网易云暂时无法返回歌单（错误码 503）" });
+  assert.equal(progress[0].percent, 26);
+  assert.match(progress[0].message, /1 秒后重试.*第 2 次/);
+  assert.match(logs[0], /503/);
+});
+
 test("diagnostic download has an accessible Lucide icon and retains its upstream license", () => {
   const html = renderAppHtml();
   const button = html.match(/<button[^>]*id="downloadDiagnostics"[\s\S]*?<\/button>/)[0];

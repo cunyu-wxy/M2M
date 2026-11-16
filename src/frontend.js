@@ -1526,6 +1526,11 @@ SOFTWARE.</desc>
         setParseProgress(26, "读取歌单结构");
         addLog(elements.parseLog, "正在读取歌单曲目 ID");
       }
+      if (event.stage === "playlist" && event.status === "retrying") {
+        const message = "网易云请求暂时失败，" + Math.ceil(event.retryAfterMs / 1000) + " 秒后重试（第 " + event.attempt + " 次请求）";
+        setParseProgress(26, message);
+        addLog(elements.parseLog, event.message + " " + message);
+      }
       if (event.stage === "playlist" && event.status === "complete") {
         elements.metricTotal.textContent = String(event.trackCount || event.requestedTrackCount || 0);
         elements.metricPlaylist.textContent = shortText(event.playlistName || "-", 10);
